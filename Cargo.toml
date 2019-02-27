@@ -1,0 +1,11 @@
+[package]
+name = "screen_capturer"
+version = "0.1.0"
+authors = ["TKGgunter <thothgunter@live.com>"]
+
+[dependencies.stb_tt-sys]
+path = "stb_tt-sys/"
+
+[dependencies]
+ndarray = "*"
+winapi = { version = "0.3.6", features = ["winuser", "xinput", "windef", "wingdi", "winnt", "libloaderapi", "memoryapi", "processenv"] }

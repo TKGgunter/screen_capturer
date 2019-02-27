@@ -1,0 +1,1 @@
+C:\Users\thoth\Documents\Rust\hello\stb_tt-sys\target\debug\libstb_tt_sys.rlib: C:\Users\thoth\Documents\Rust\hello\stb_tt-sys\src\lib.rs C:\Users\thoth\Documents\Rust\hello\stb_tt-sys\stb_tt/build.rs

@@ -1,0 +1,28 @@
+
+
+
+
+Are we running?
+
+
+
+
+TARGET = Some("x86_64-pc-windows-msvc")
+OPT_LEVEL = Some("0")
+HOST = Some("x86_64-pc-windows-msvc")
+CC_x86_64-pc-windows-msvc = None
+CC_x86_64_pc_windows_msvc = None
+HOST_CC = None
+CC = None
+CFLAGS_x86_64-pc-windows-msvc = None
+CFLAGS_x86_64_pc_windows_msvc = None
+HOST_CFLAGS = None
+CFLAGS = None
+DEBUG = Some("true")
+running: "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\bin\\amd64\\cl.exe" "/nologo" "/MD" "/Z7" "/W4" "/FoC:\\Users\\thoth\\Documents\\Rust\\hello\\stb_tt-sys\\target\\debug\\build\\stb_tt-sys-cbc8186ea66814f5\\out\\stb_tt\\stb_truetype.o" "/c" "stb_tt/stb_truetype.c"
+stb_truetype.c
+exit code: 0
+running: "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC\\bin\\amd64\\lib.exe" "/OUT:C:\\Users\\thoth\\Documents\\Rust\\hello\\stb_tt-sys\\target\\debug\\build\\stb_tt-sys-cbc8186ea66814f5\\out\\libstb_tt.a" "/nologo" "C:\\Users\\thoth\\Documents\\Rust\\hello\\stb_tt-sys\\target\\debug\\build\\stb_tt-sys-cbc8186ea66814f5\\out\\stb_tt\\stb_truetype.o"
+exit code: 0
+cargo:rustc-link-lib=static=stb_tt
+cargo:rustc-link-search=native=C:\Users\thoth\Documents\Rust\hello\stb_tt-sys\target\debug\build\stb_tt-sys-cbc8186ea66814f5\out

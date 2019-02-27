@@ -1,0 +1,1 @@
+{"rustc":16506240824610328313,"features":"[]","target":13087338883098861251,"profile":18275008992213150340,"path":10872709659218687626,"deps":[["libc v0.2.48","libc",2177602309165677771]],"local":[{"MtimeBased":[[1549156074,166586100],".fingerprint\\stb_tt-sys-d3798a1e1540817b\\dep-lib-stb_tt_sys-d3798a1e1540817b"]}],"rustflags":[],"edition":"Edition2018"}
