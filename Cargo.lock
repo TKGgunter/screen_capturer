@@ -9,15 +9,6 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "hello"
-version = "0.1.0"
-dependencies = [
- "ndarray 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
- "stb_tt-sys 0.1.0",
- "winapi 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "itertools"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -66,6 +57,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "rawpointer"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "screen_capturer"
+version = "0.1.0"
+dependencies = [
+ "ndarray 0.10.8 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stb_tt-sys 0.1.0",
+ "winapi 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "stb_tt-sys"

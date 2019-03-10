@@ -95,13 +95,13 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
 
     let w = rect.right - rect.left;
     let h = rect.bottom - rect.top;
-    //DO WE NNED TO FREE THIS?
+
     let mut bitmap_handle = CreateCompatibleBitmap( handle_dc.window_dc, w, h);
 
     if bitmap_handle == null_mut(){
         println!("bitmap was bad.");
     }
-    //DO WE NNED TO FREE THIS?
+
     let mut compat_dc = CreateCompatibleDC(handle_dc.window_dc);
     let mut _wi = 0;
     while true {
@@ -122,7 +122,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
         //https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
         //https://msdn.microsoft.com/en-us/library/windows/desktop/dd183402(v=vs.85).aspx
         //https://stackoverflow.com/questions/31302185/rust-ffi-casting-to-void-pointer
-        let mut pixels = vec![0u8; (4*w*h) as usize]; //TODO might want to change this to an array of u8s
+        let mut pixels = vec![0u8; (4*w*h) as usize];
         let mut bitmap = BITMAP{bmType: 0, bmWidth: 0, bmHeight: 0, bmWidthBytes: 0, bmPlanes: 0, bmBitsPixel: 0, bmBits: &mut pixels[0] as *mut u8 as *mut winapi::ctypes::c_void};
 
         GetObjectW(bitmap_handle as *mut winapi::ctypes::c_void, mem::size_of::<BITMAP>() as i32 , &mut bitmap as *mut BITMAP as *mut winapi::ctypes::c_void);
@@ -141,7 +141,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
                 biClrUsed: 0,
                 biClrImportant: 0,
             },
-            bmiColors: [new_rgbquad()], //[]//DIB_RGB_COLORS,
+            bmiColors: [new_rgbquad()],
         };
 
         GetDIBits(handle_dc.window_dc, bitmap_handle, 0, bitmap.bmHeight as u32, &mut pixels[0] as *mut u8 as *mut winapi::ctypes::c_void, &mut bitmap_info as *mut BITMAPINFO, 0);
@@ -175,7 +175,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
     }
     for it in rt.iter(){
         let mut filebuffer = File::create(format!("{}/{}_{:}.bmp",directory_prepend, file_prepend, _wi)).unwrap();
-        //filebuffer.write( &transmute(&header) ).unwrap();
+
         {
             filebuffer.write( &transmute(&it.file_header.type_) ).unwrap();
             filebuffer.write( &transmute(&it.file_header.size_) ).unwrap();
@@ -184,7 +184,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
             filebuffer.write( &transmute(&it.file_header.off_bits) ).unwrap();
         }
         {
-            //filebuffer.write( &transmute(&info) ).unwrap();
+
             filebuffer.write( &transmute(&it.info_header.header_size) ).unwrap();
             filebuffer.write( &transmute(&it.info_header.width) ).unwrap();
             filebuffer.write( &transmute(&it.info_header.height) ).unwrap();
@@ -310,7 +310,7 @@ static mut GLOBAL_BACKBUFFER : WindowsCanvas = WindowsCanvas{
                 rgbBlue: 0,
                 rgbGreen: 0,
                 rgbRed: 0,
-                rgbReserved: 0, }],//[]//DIB_RGB_COLORS,
+                rgbReserved: 0, }],
     },
     w : 0,
     h : 0,
@@ -416,11 +416,6 @@ fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, a
                 if _i >= w { _i = w-1; }
                 if _j >= h { _j = h-1; }
 
-                //TODO
-                //Remove me
-                if j == 600{
-   //                 println!("{} {} {} {}", scale_w,  scale_h, h, source_bmp.info_header.height);
-                }
 
                 let src_rgb = source_buffer.offset(  bytes_per_pix * (i + source_bmp.info_header.width * j) as isize);
                 let src_r =  *(src_rgb as *const u8).offset(2);
@@ -432,9 +427,6 @@ fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, a
                 let b = (src_b as f32 * scale_w * scale_h) as u32;
 
                 *dst_buffer.offset( (_i + w * _j) as isize ) += 0x00000000 + (r << 16) + (g << 8) + b;
-                //TODO
-                //Remove me
-                //println!( "{:x} {:x}", *src_rgb, *dst_buffer.offset( (_i + w * _j) as isize ));
 
             }
         }
@@ -469,12 +461,6 @@ fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, a
                 let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - alpha )) as u32;
 
                 *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r+_r << 16) + (g+_g << 8) + b+_b;
-                //TODO
-                //Remove me
-                if i == 100 {
-                    //println!("{} {} {} \t {} {} {}", r, g, b, _r, _g, _b);
-                    //println!( "{:x} ",  *buffer.offset( (j +bmp.info_header.width * j + offset) as isize ));
-                }
             }
         }
     }
@@ -483,7 +469,7 @@ fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, a
 
 fn drawChar( canvas: &mut WindowsCanvas, character: char, x: i32, y: i32,
              color: [f32; 4], size: f32 )->i32{unsafe{
-    //TODO set up alpha
+
     //Check that globalfontinfo has been set
     if GLOBAL_FONTINFO.data == null_mut() {
         println!("Global font has not been set.");
@@ -531,6 +517,8 @@ fn drawChar( canvas: &mut WindowsCanvas, character: char, x: i32, y: i32,
     //println!("time to render to buffer {:?} {} {:x} {}", now.elapsed(), character, character as i32, size);
     //now = time::Instant::now();
 
+    //NOTE
+    //If the character is invisible then don't render
     if character as u8 > 0x20{   //render char_buffer to main_buffer
         let buffer = canvas.buffer as *mut u32;
         let gwidth = canvas.w as usize;
@@ -587,8 +575,6 @@ fn drawString( canvas: &mut WindowsCanvas, string: &str, x: i32, y: i32,
     }
 }
 fn drawRect( canvas: &mut WindowsCanvas, rect: [i32; 4], color: [f32; 4], filled: bool ){unsafe{
-    //TODO
-    //handle alpha  parameter
     let mut buffer = canvas.buffer as *mut u32;
 
     let c_w = canvas.w as isize;
@@ -699,7 +685,7 @@ extern "system" fn window_callback(window: HWND, message: u32, w_param: usize, l
             let mut canvas = PAINTSTRUCT{hdc: null_mut(), fErase: 0 , rcPaint:rect, fRestore: 0, fIncUpdate: 0, rgbReserved: [0;32]};
             BeginPaint(window, &mut canvas as *mut PAINTSTRUCT );
             {//TODO
-             //will soon becomre my DrawRect function
+             //will soon become my DrawRect function
                 let x = canvas.rcPaint.left;
                 let y = canvas.rcPaint.top;
                 let w = canvas.rcPaint.right - canvas.rcPaint.left;

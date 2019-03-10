@@ -1,0 +1,34 @@
+march 9, 2019 code review
+
++ Description of code at a high level.
+    - At the top of the file one should be informed of the code's mission statement.
+
+    fn screen_shot
++ double include "use std::io::prelude::*" line 11.
++ used twice but included locally gdi32::CreateCompatibleDC,
++ line 85 is not used gdi32::GetObjectA
++ line 101 if bitmap_handle  is bad we should exit fn screen_shot
++ wtf is _wi line 106
++ line 108 should we keep the ability to exit out of a screen capture loop? screen captures seem to take so little
+time that it doesn't seem useful.
++ wtf is bRet line 119?
++ line 125 the inclusion of pixels is not necessary. I don't think the buffer is used when I give it to windows
++ lines 130 and line 159 bitmap_info and info have the exact same information. Do we need two instances.
+
+    fn renderToBuffer
++ line 320 this function should be renamed.
+    - applies a constant color to a buffer. This is not apparent from the name.
++ an option for an input color should be added
+
++ line 330 all static vars should be grouped together at the head of the file
+
+    fn resizeBMP
++ add enlarge resizing
++ there needs to be an optimization pass
+
+    fn drawBMP
++  line 394 swap hard coded rescale with rescale function
++  line 394 bypass rescale if there is no rescale option
+
+    fn drawChar
++ 
