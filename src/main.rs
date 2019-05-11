@@ -25,6 +25,7 @@ use std::thread::sleep;
 
 
 /*
+
 100 images per run
     + 3.034
     + 2.46
