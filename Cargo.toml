@@ -5,6 +5,8 @@ authors = ["TKGgunter <thothgunter@live.com>"]
 
 [dependencies.stb_tt-sys]
 path = "stb_tt-sys/"
+[dependencies.tensorflow-sys-tools]
+path = "tensorflow-sys-tools/"
 
 [dependencies]
 ndarray = "*"

@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 extern crate winapi;
 extern crate stb_tt_sys;
+extern crate tensorflow_sys_tools;
 
 
 
@@ -13,6 +14,7 @@ use std::io::prelude::*;
 use std::fs::{File, create_dir, read_dir};
 use std::time;
 use std::ptr::{null, null_mut};
+use std::thread::sleep;
 use winapi::shared::windef::{HWND, RECT, HDC, HWND__, HDC__};
 use winapi::um::wingdi::{BITMAP, BITMAPINFO, BITMAPINFOHEADER, SRCCOPY, RGBQUAD};
 use winapi::um::wingdi as gdi32;
@@ -21,9 +23,11 @@ use winapi::um::winuser as user32;
 use winapi::um::libloaderapi as kernel32;
 use winapi::um::xinput;
 use stb_tt_sys::*;
-use std::thread::sleep;
+use tensorflow_sys_tools::tensorflow_tools::*;
+use tensorflow_sys_tools::tensorflow_bindings::tensorflow_init;
 
 
+static mut _v: *const std::ffi::c_void = null_mut();
 /*
 
 100 images per run
@@ -42,6 +46,11 @@ So we can see 50 frames per second without writing the frames out
 */
 
 //TODO
+// + I want to be able to change fonts
+// + fdraw functions where position data is floating point
+// + copy chunks of pixel buffers where you can instead of iterating
+
+//TODO: screen_capture related
 // + test and use app
 // + debug selecting gamepad vs keyboard
 //    + hard to get out of gamepad key selection mode if you never select any thing
@@ -54,6 +63,431 @@ So we can see 50 frames per second without writing the frames out
 // + cheat engine like tool <= I don't think i need this we can just call windows to get
 //    relevent info
 //https://github.com/fenix01/cheatengine-library
+
+pub mod windowslayer{
+use winapi::shared::windef::{HWND, RECT, HDC, HWND__, HDC__};
+use std::ptr::{null, null_mut};
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt; //For encode wide
+    pub struct WindowHandleDC{
+        pub window_handle : *mut HWND__,
+        pub window_dc     : *mut HDC__,
+    }
+    pub fn load_handle_dc(window_name: &str, )->WindowHandleDC{ unsafe{
+        use std::iter::once;
+        use user32::{FindWindowW, GetWindowDC};
+
+        let windows_string: Vec<u16> = OsStr::new(window_name).encode_wide().chain(once(0)).collect();
+
+        let handle = FindWindowW(null_mut(), windows_string.as_ptr());
+        let handle_dc = WindowHandleDC{ window_handle: handle,
+                        window_dc: GetWindowDC(handle)};
+
+        return handle_dc;
+    }}
+}
+
+pub mod renderingtools{
+extern crate stb_tt_sys;
+
+use std::ptr::{null, null_mut};
+use winapi::um::wingdi::{BITMAP, BITMAPINFO, BITMAPINFOHEADER, SRCCOPY, RGBQUAD};
+use stb_tt_sys::*;
+
+    pub static mut GLOBAL_FONTINFO : stbtt_fontinfo = new_stbtt_fontinfo();
+
+    pub struct WindowsCanvas{
+        pub info : BITMAPINFO,
+        pub w: i32,
+        pub h: i32,
+        pub buffer: *mut std::ffi::c_void
+    }
+    #[derive(Debug)]
+    #[derive(Default, Clone)]
+    pub struct TGBitmapHeaderInfo{
+        pub header_size:        u32,
+        pub width:              i32,
+        pub height:             i32,
+        pub planes:             u16,
+        pub bit_per_pixel:      u16,
+        pub compression:        u32,
+        pub image_size:         u32,
+        pub x_px_per_meter:     i32,
+        pub y_px_per_meter:     i32,
+        pub colors_used:        u32,
+        pub colors_important:   u32,
+    }
+
+    //struct palette
+    //array of pixels
+
+    #[repr(packed)]
+    #[derive(Clone)]
+    pub struct TGBitmapFileHeader{
+       pub  type_:              u16,
+       pub  size_:              u32,
+       pub  reserved_1:         u16,
+       pub  reserved_2:         u16,
+       pub  off_bits:           u32,
+    }
+
+
+    #[derive(Clone)]
+    pub struct TGBitmap{
+       pub file_header:        TGBitmapFileHeader,
+       pub info_header:        TGBitmapHeaderInfo,
+       pub rgba:               Vec<u8>,
+    }
+
+    impl TGBitmap{
+        pub fn new(w: i32, h: i32)->TGBitmap{
+            TGBitmap{
+                file_header: TGBitmapFileHeader{
+                    type_: 0x4d42, //BM
+                    size_: 0,
+                    reserved_1: 0,
+                    reserved_2: 0,
+                    off_bits: 0,
+                },
+                info_header:   TGBitmapHeaderInfo{
+                        header_size:        0,
+                        width:              w,
+                        height:             h,
+                        planes:             1,
+                        bit_per_pixel:      32,
+                        compression:        0,
+                        image_size:         0,
+                        x_px_per_meter:     0,
+                        y_px_per_meter:     0,
+                        colors_used:        0,
+                        colors_important:   0,
+                },
+                rgba: vec![0;4 * (w*h) as usize],
+            }
+
+        }
+    }
+
+    pub fn renderDefaultToBuffer( canvas: &mut WindowsCanvas, default_color: Option<[u8;4]>){unsafe{
+        let buffer = canvas.buffer as *mut u32;
+        let w = canvas.w;
+        let h = canvas.h;
+
+        let mut r = 100;
+        let mut g = 50;
+        let mut b = 50;
+        match default_color{
+            Some(arr) =>{
+                r = arr[0] as u32;
+                g = arr[1] as u32;
+                b = arr[2] as u32;
+            },
+            None =>{
+            }
+        }
+        for i in 0..(w*h) as isize {
+            *buffer.offset(i) = 0x00000000 + (r << 16) +  (g << 8)  + b;
+        }
+    }}
+    pub fn resizeBMP(source_bmp: &TGBitmap, w: i32, h: i32)->TGBitmap{unsafe{
+        let mut bmp = TGBitmap::new(w, h);
+        {
+            if source_bmp.info_header.width < w{
+                println!("Trash", );
+            }
+            if source_bmp.info_header.height < h{
+                println!("Trash");
+            }
+            let scale_w = w as f32 / source_bmp.info_header.width as f32;
+            let scale_h = h as f32 / source_bmp.info_header.height as f32;
+
+
+
+            let source_buffer = source_bmp.rgba.as_ptr();
+            let dst_buffer = bmp.rgba.as_mut_ptr() as *mut u32;
+
+            let bytes_per_pix = (source_bmp.info_header.bit_per_pixel / 8) as isize;
+
+            for j in 0..source_bmp.info_header.height{
+                for i in 0..source_bmp.info_header.width{
+                    let mut _i;
+                    let mut _j;
+                    _i = (i as f32 * scale_w) as i32;
+                    _j = (j as f32 * scale_h) as i32;
+
+
+                    if _i >= w { _i = w-1; }
+                    if _j >= h { _j = h-1; }
+
+
+                    let src_rgb = source_buffer.offset(  bytes_per_pix * (i + source_bmp.info_header.width * j) as isize);
+                    let src_r =  *(src_rgb as *const u8).offset(2);
+                    let src_g =  *(src_rgb as *const u8).offset(1);
+                    let src_b =  *(src_rgb as *const u8).offset(0);
+
+                    let mut _scale_w = scale_w;
+                    let mut _scale_h = scale_h;
+                    fn get_correct_scale_for_pixel(original_index: i32, scale: f32)->f32{
+                        let mut post_index  = scale * (original_index as f32);
+                        let mut _it = post_index;
+                        if ((post_index - post_index.trunc()) / scale).trunc() >= 1.0{
+                            _it -= 1.0 * ((post_index - post_index.trunc()) / scale).trunc() * scale;
+                        }
+                        return  1.0/ (  (((1.0+_it).trunc() - _it ) / scale).trunc() + 1.0) ;
+                    }
+                    _scale_h = get_correct_scale_for_pixel(j, scale_h);
+                    _scale_w = get_correct_scale_for_pixel(i, scale_w);
+                    ///////////////////////////////
+
+                    let r = (src_r as f32 * _scale_w * _scale_h) as u32;
+                    let g = (src_g as f32 * _scale_w * _scale_h) as u32;
+                    let b = (src_b as f32 * _scale_w * _scale_h) as u32;
+
+                    *dst_buffer.offset( (_i + w * _j) as isize ) += 0x00000000 + (r << 16) + (g << 8) + b;
+                }
+            }
+        }
+        return bmp;
+    }}
+
+
+
+    pub fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, alpha: f32,
+                _w: Option<i32>, _h: Option<i32>){unsafe{
+
+        if alpha < 0.0 {
+            println!("A negative alpha as passed to drawBMP");
+            return;
+        }
+        let w;
+        let h;
+
+        match _w {
+            Some(int) => w = int,
+            None => w = source_bmp.info_header.width,
+        }
+        match _h {
+            Some(int) => h = int,
+            None => h = source_bmp.info_header.height,
+        }
+
+        let bmp = if w == source_bmp.info_header.width &&
+                          h == source_bmp.info_header.height
+                        { (*source_bmp).clone() }
+                        else { resizeBMP(source_bmp, w, h)};
+
+        {   //render bmp_buffer to main_buffer
+
+            let buffer = canvas.buffer as *mut u32;
+            let gwidth = canvas.w as i32;
+            let gheight = canvas.h as i32;
+            let offset = (x + y * gwidth) as i32;
+            let bit_stride = (bmp.info_header.bit_per_pixel / 8) as i32;
+
+            let color = bmp.rgba.as_ptr();
+            for i in (0..bmp.info_header.height).rev(){
+                //TODO
+                //when alpha is one copy the bmp bits instead of iterating through the array
+                if alpha < 0.99 {
+                    for j in 0..bmp.info_header.width{
+
+                        if (j + i*gwidth + offset) < 0 {continue;}
+                        if (j + i*gwidth + offset) > gwidth * gheight {continue;}
+
+                        if j + x > gwidth {continue;}
+                        if i + y > gheight {continue;}
+
+
+                        let r = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 2) as isize) as f32 * alpha ) as u32;
+                        let g = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 1) as isize) as f32 * alpha ) as u32;
+                        let b = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 0) as isize) as f32 * alpha ) as u32;
+
+
+                        let dst_rgb = buffer.offset( (j + i*gwidth + offset) as isize);
+                        let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - alpha )) as u32;
+                        let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - alpha )) as u32;
+                        let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - alpha )) as u32;
+
+                        let r_cmp = (r+_r).min(255).max(0);
+                        let g_cmp = (g+_g).min(255).max(0);
+                        let b_cmp = (b+_b).min(255).max(0);
+
+                        *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r_cmp << 16) + (g_cmp << 8) + b_cmp;
+                    }
+                }
+                else{
+                    let _w = bmp.info_header.width as usize;
+                    let _off_src = i as isize * _w as isize * bit_stride as isize;
+                    let _off_dst = i as isize * gwidth as isize;
+                    std::ptr::copy::<u32>(color.offset(_off_src) as *const u32, buffer.offset( _off_dst + offset as isize), _w);
+                }
+            }
+        }
+    }}
+
+    pub fn drawChar( canvas: &mut WindowsCanvas, character: char, x: i32, y: i32,
+                 color: [f32; 4], size: f32 )->i32{unsafe{
+
+        //Check that globalfontinfo has been set
+        if GLOBAL_FONTINFO.data == null_mut() {
+            println!("Global font has not been set.");
+            return -1;
+        }
+        //let mut now = time::Instant::now();
+
+        //construct a char buffer
+        let mut char_buffer;
+        let cwidth;
+        let cheight;
+        let scale;
+        {//NOTE
+         //this accounts for about 10% of character rendering time.
+         //If we want an easy speed up we can save the results to a global buffer  map
+         // can only add to it when there is a new character being renedered
+         // however if we build in release mode it doesn't really matter
+            let mut x0 = 0i32;
+            let mut x1 = 0i32;
+            let mut y0 = 0i32;
+            let mut y1 = 0i32;
+            let mut ascent = 0;
+            let mut descent = 0;
+
+            stbtt_GetFontVMetrics(&mut GLOBAL_FONTINFO as *mut stbtt_fontinfo,
+                                  &mut ascent as *mut i32,
+                                  &mut descent as *mut i32, null_mut());
+            scale = stbtt_ScaleForPixelHeight(&GLOBAL_FONTINFO as *const stbtt_fontinfo, size);
+            let baseline = (ascent as f32 * scale ) as i32;
+
+            cwidth = (scale * (ascent - descent) as f32 ) as usize + 4;
+            cheight = (scale * (ascent - descent) as f32 ) as usize + 4;
+            char_buffer = vec![0u8; cwidth * cheight];
+
+            //render char to buffer
+            stbtt_GetCodepointBitmapBoxSubpixel(&GLOBAL_FONTINFO as *const stbtt_fontinfo, character as u8, scale, scale, 0.0,0.0,
+                                                &mut x0 as *mut i32,
+                                                &mut y0 as *mut i32,
+                                                &mut x1 as *mut i32,
+                                                &mut y1 as *mut i32);
+            stbtt_MakeCodepointBitmapSubpixel(  &GLOBAL_FONTINFO as *const stbtt_fontinfo,
+                                                &mut char_buffer[cwidth*(baseline + y0) as usize + (5 + x0) as usize ] as *mut u8,
+                                                 x1-x0+2, y1-y0, cwidth as i32, scale, scale,0.0, 0.0, character as i32);
+        }
+        //println!("time to render to buffer {:?} {} {:x} {}", now.elapsed(), character, character as i32, size);
+        //now = time::Instant::now();
+
+        //NOTE
+        //If the character is invisible then don't render
+        if character as u8 > 0x20{   //render char_buffer to main_buffer
+            let buffer = canvas.buffer as *mut u32;
+            let gwidth = canvas.w as usize;
+            let gheight = canvas.h as usize;
+            let offset = (x as usize + y as usize * gwidth) as usize;
+            for i in 0..cheight{
+                for j in 0..cwidth{
+
+                    if (j + i*gwidth + offset) > gwidth * gheight {continue;}
+
+                    if j + x as usize  > gwidth {continue;}
+                    if i + y as usize  > gheight {continue;}
+
+                    let text_alpha = char_buffer[j + cwidth * (cheight - 1 - i)] as f32;
+                    let a = color[3];
+                    let r = (color[0] * text_alpha * a) as u32;
+                    let g = (color[1] * text_alpha * a) as u32;
+                    let b = (color[2] * text_alpha * a) as u32;
+
+                    let dst_rgb = buffer.offset( (j + i*gwidth + offset) as isize);
+                    let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
+                    let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
+                    let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
+
+                    *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r+_r << 16) + (g+_g << 8) + b+_b;
+                }
+            }
+        }
+        //println!("time to render to screen {:?}", now.elapsed());
+
+        let mut adv : i32 = 0;
+        let mut lft_br : i32 = 0; // NOTE: Maybe remove this
+        stbtt_GetCodepointHMetrics(&GLOBAL_FONTINFO as *const stbtt_fontinfo, character as i32, &mut adv as *mut i32, &mut lft_br as *mut i32);
+        return (adv as f32 * scale) as i32;
+    }}
+
+    pub fn drawString( canvas: &mut WindowsCanvas, string: &str, x: i32, y: i32,
+                 color: [f32; 4], size: f32 )->i32{
+        let mut offset = 0;
+        for it in string.chars(){
+            offset += drawChar(canvas, it, x + offset, y, color, size);
+        }
+        return offset;
+    }
+
+    pub fn drawRect( canvas: &mut WindowsCanvas, rect: [i32; 4], color: [f32; 4], filled: bool ){unsafe{
+        //TODO
+        //use std::ptr::copy when the alpha component is near or equal to one.
+        //This is an optimization
+
+        let buffer = canvas.buffer as *mut u32;
+
+        let c_w = canvas.w as isize;
+        let c_h = canvas.h as isize;
+
+        let x = rect[0] as isize;
+        let y = rect[1] as isize;
+        let w = rect[2] as isize;
+        let h = rect[3] as isize;
+
+        let a = color[3];
+        let r = (color[0] * a * 255.0) as u32;
+        let g = (color[1] * a * 255.0) as u32;
+        let b = (color[2] * a * 255.0) as u32;
+
+        let mut fast_rgba_buffer = vec![0x00000000 + (r << 16) +  (g << 8)  + b; w as usize];
+
+
+        let mut _continue = false;
+        if x >= 0 && y >= 0 && x < c_w && y < c_h{
+            _continue = true;
+        }
+        if _continue == false {return;}
+
+        for _j in y..y+h{
+            let j = _j as isize;
+            if a < 0.99 || filled == false{
+                for _i in x..x+w{
+                    let i = _i as isize;
+                    if i > c_w || j > c_h{
+                        continue;
+                    }
+                    let dst_rgb = buffer.offset( (i + c_w*j) as isize);
+                    let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - a)) as u32;
+                    let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - a)) as u32;
+                    let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - a)) as u32;
+
+                    if filled == false{
+                         if (_i - x) > 1 && (_i - x ) < w-2 &&
+                          (_j - y) > 1 && (_j - y ) < h-2{continue;}
+
+                         *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
+
+                    } else {
+                        *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
+                    }
+                }
+            }
+            else {
+                //TODO
+                //Test me does this optimization really help
+                std::ptr::copy::<u32>(fast_rgba_buffer.as_ptr(), buffer.offset(c_w*j + x), w as usize);
+            }
+        }
+    }}
+
+}
+
+use windowslayer::*;
+use renderingtools::*;
+
 static mut GLOBAL_BACKBUFFER : WindowsCanvas = WindowsCanvas{
     info : BITMAPINFO{
         bmiHeader : BITMAPINFOHEADER{
@@ -79,26 +513,10 @@ static mut GLOBAL_BACKBUFFER : WindowsCanvas = WindowsCanvas{
     h : 0,
     buffer : null_mut(),
 };
-static mut GLOBAL_FONTINFO : stbtt_fontinfo = new_stbtt_fontinfo();
+//TODO set this up so that one does not use
+//static mut GLOBAL_FONTINFO : stbtt_fontinfo = new_stbtt_fontinfo();
 static mut GLOBAL_WINDOWINFO : WindowInfo = WindowInfo{ x: 0, y: 0, w: 0, h: 0};
 
-struct WindowHandleDC{
-    window_handle : *mut HWND__,
-    window_dc     : *mut HDC__,
-}
-
-fn load_handle_dc(window_name: &str, )->WindowHandleDC{ unsafe{
-    use std::iter::once;
-    use user32::{FindWindowW, GetWindowDC};
-
-    let windows_string: Vec<u16> = OsStr::new(window_name).encode_wide().chain(once(0)).collect();
-
-    let handle = FindWindowW(null_mut(), windows_string.as_ptr());
-    let handle_dc = WindowHandleDC{ window_handle: handle,
-                    window_dc: GetWindowDC(handle)};
-
-    return handle_dc;
-}}
 
 fn new_rgbquad()->RGBQUAD{
      RGBQUAD{
@@ -109,8 +527,7 @@ fn new_rgbquad()->RGBQUAD{
      }
 }
 
-
-fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &str, directory_prepend: &str)->Vec<TGBitmap>{unsafe{
+fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &str, directory_prepend: &str, save_files: bool)->Vec<TGBitmap>{unsafe{
     use gdi32::{CreateCompatibleBitmap, SelectObject, BitBlt, GetObjectW, GetDIBits};
 
     let mut rt = Vec::new();
@@ -204,10 +621,10 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
         rt.push(TGBitmap{file_header: header, info_header: info, rgba: pixels});
 
     }
-    for it in rt.iter(){
+    if save_files{for it in rt.iter(){
 
         let filename = format!("{}/{}_{:}.bmp",directory_prepend, file_prepend, _capture_count);
-        println!("writing {}", filename);
+        //println!("writing {}", filename);
         let mut filebuffer = match File::create(filename){
             Ok(_fb) => _fb,
             Err(_s) => {
@@ -238,7 +655,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
             filebuffer.write( &transmute(&it.info_header.colors_important) ).expect("BMP info_header.colors_important could not be written.");
         }
         filebuffer.write( &it.rgba ).expect("BMP rgba arr could not be written.");
-    }
+    }}
     gdi32::DeleteDC(compat_dc as HDC);
     gdi32::DeleteDC(bitmap_handle as HDC);
     return rt;
@@ -252,299 +669,8 @@ fn transmute<T>(t:&T)->Vec<u8>{unsafe{
     }
     v
 }}
-#[derive(Debug)]
-#[derive(Default, Clone)]
-struct TGBitmapHeaderInfo{
-    header_size:        u32,
-    width:              i32,
-    height:             i32,
-    planes:             u16,
-    bit_per_pixel:      u16,
-    compression:        u32,
-    image_size:         u32,
-    x_px_per_meter:     i32,
-    y_px_per_meter:     i32,
-    colors_used:        u32,
-    colors_important:   u32,
-}
-
-//struct palette
-//array of pixels
-
-#[repr(packed)]
-#[derive(Clone)]
-struct TGBitmapFileHeader{
-    type_:              u16,
-    size_:              u32,
-    reserved_1:         u16,
-    reserved_2:         u16,
-    off_bits:           u32,
-}
 
 
-#[derive(Clone)]
-struct TGBitmap{
-    file_header:        TGBitmapFileHeader,
-    info_header:        TGBitmapHeaderInfo,
-    rgba:               Vec<u8>,
-}
-
-impl TGBitmap{
-    fn new(w: i32, h: i32)->TGBitmap{
-        TGBitmap{
-            file_header: TGBitmapFileHeader{
-                type_: 0x4d42, //BM
-                size_: 0,
-                reserved_1: 0,
-                reserved_2: 0,
-                off_bits: 0,
-            },
-            info_header:   TGBitmapHeaderInfo{
-                    header_size:        0,
-                    width:              w,
-                    height:             h,
-                    planes:             1,
-                    bit_per_pixel:      32,
-                    compression:        0,
-                    image_size:         0,
-                    x_px_per_meter:     0,
-                    y_px_per_meter:     0,
-                    colors_used:        0,
-                    colors_important:   0,
-            },
-            rgba:               vec![0;4 * (w*h) as usize],
-        }
-
-    }
-}
-
-
-struct WindowsCanvas{
-    info : BITMAPINFO,
-    w: i32,
-    h: i32,
-    buffer: *mut std::ffi::c_void
-}
-
-fn renderDefaultToBuffer( canvas: &mut WindowsCanvas, default_color: Option<[u8;4]>){unsafe{
-    let buffer = canvas.buffer as *mut u32;
-    let w = canvas.w;
-    let h = canvas.h;
-
-    let mut r = 100;
-    let mut g = 50;
-    let mut b = 50;
-    match default_color{
-        Some(arr) =>{
-            r = arr[0] as u32;
-            g = arr[1] as u32;
-            b = arr[2] as u32;
-        },
-        None =>{
-        }
-    }
-    for i in 0..(w*h) as isize {
-        *buffer.offset(i) = 0x00000000 + (r << 16) +  (g << 8)  + b;
-    }
-}}
-
-
-fn resizeBMP(source_bmp: &TGBitmap, w: i32, h: i32)->TGBitmap{unsafe{
-    let mut bmp = TGBitmap::new(w, h);
-    {
-        //we need to determine a way to bin our input BMP
-        if source_bmp.info_header.width < w{
-            println!("Trash", );
-        }
-        if source_bmp.info_header.height < h{
-            println!("Trash");
-        }
-        let scale_w = w as f32 / source_bmp.info_header.width as f32;
-        let scale_h = h as f32 / source_bmp.info_header.height as f32;
-
-        let source_buffer = source_bmp.rgba.as_ptr();
-        let dst_buffer = bmp.rgba.as_mut_ptr() as *mut u32;
-
-        let bytes_per_pix = (source_bmp.info_header.bit_per_pixel / 8) as isize;
-
-        for i in 0..source_bmp.info_header.width{
-            for j in 0..source_bmp.info_header.height{
-                let mut _i = (i as f32 * scale_w).round() as i32;
-                let mut _j = (j as f32 * scale_h).round() as i32;
-
-                if _i >= w { _i = w-1; }
-                if _j >= h { _j = h-1; }
-
-
-                let src_rgb = source_buffer.offset(  bytes_per_pix * (i + source_bmp.info_header.width * j) as isize);
-                let src_r =  *(src_rgb as *const u8).offset(2);
-                let src_g =  *(src_rgb as *const u8).offset(1);
-                let src_b =  *(src_rgb as *const u8).offset(0);
-
-                let r = (src_r as f32 * scale_w * scale_h) as u32;
-                let g = (src_g as f32 * scale_w * scale_h) as u32;
-                let b = (src_b as f32 * scale_w * scale_h) as u32;
-
-                *dst_buffer.offset( (_i + w * _j) as isize ) += 0x00000000 + (r << 16) + (g << 8) + b;
-            }
-        }
-    }
-    return bmp;
-}}
-
-
-
-fn drawBMP( canvas: &mut WindowsCanvas, source_bmp: &TGBitmap, x: i32, y: i32, alpha: f32,
-            _w: Option<i32>, _h: Option<i32>){unsafe{
-
-    if alpha < 0.0 {
-        println!("A negative alpha as passed to drawBMP");
-        return;
-    }
-    let w;
-    let h;
-
-    match _w {
-        Some(int) => w = int,
-        None => w = source_bmp.info_header.width,
-    }
-    match _h {
-        Some(int) => h = int,
-        None => h = source_bmp.info_header.height,
-    }
-
-    let bmp = if w == source_bmp.info_header.width &&
-                      h == source_bmp.info_header.height
-                    { (*source_bmp).clone() }
-                    else { resizeBMP(source_bmp, w, h)};
-
-    {   //render bmp_buffer to main_buffer
-
-        let buffer = canvas.buffer as *mut u32;
-        let gwidth = canvas.w as i32;
-        let gheight = canvas.h as i32;
-        let offset = (x + y * gwidth) as i32;
-        let bit_stride = (bmp.info_header.bit_per_pixel / 8) as i32;
-
-        let color = bmp.rgba.as_ptr();
-        for i in (0..bmp.info_header.height).rev(){
-            for j in 0..bmp.info_header.width{
-
-                if (j + i*gwidth + offset) < 0 {continue;}
-                if (j + i*gwidth + offset) > gwidth * gheight {continue;}
-
-                if j + x > gwidth {continue;}
-                if i + y > gheight {continue;}
-
-
-                let r = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 2) as isize) as f32 * alpha ) as u32;
-                let g = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 1) as isize) as f32 * alpha ) as u32;
-                let b = (*color.offset(( bit_stride * (j + i * bmp.info_header.width) + 0) as isize) as f32 * alpha ) as u32;
-
-
-                let dst_rgb = buffer.offset( (j + i*gwidth + offset) as isize);
-                let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - alpha )) as u32;
-                let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - alpha )) as u32;
-                let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - alpha )) as u32;
-
-                let r_cmp = (r+_r).min(255).max(0);
-                let g_cmp = (g+_g).min(255).max(0);
-                let b_cmp = (b+_b).min(255).max(0);
-
-                *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r_cmp << 16) + (g_cmp << 8) + b_cmp;
-            }
-        }
-    }
-}}
-
-
-fn drawChar( canvas: &mut WindowsCanvas, character: char, x: i32, y: i32,
-             color: [f32; 4], size: f32 )->i32{unsafe{
-
-    //Check that globalfontinfo has been set
-    if GLOBAL_FONTINFO.data == null_mut() {
-        println!("Global font has not been set.");
-        return -1;
-    }
-    //let mut now = time::Instant::now();
-
-    //construct a char buffer
-    let mut char_buffer;
-    let cwidth;
-    let cheight;
-    let scale;
-    {//NOTE
-     //this accounts for about 10% of character rendering time.
-     //If we want an easy speed up we can save the results to a global buffer  map
-     // can only add to it when there is a new character being renedered
-     // however if we build in release mode it doesn't really matter
-        let mut x0 = 0i32;
-        let mut x1 = 0i32;
-        let mut y0 = 0i32;
-        let mut y1 = 0i32;
-        let mut ascent = 0;
-        let mut descent = 0;
-
-        stbtt_GetFontVMetrics(&mut GLOBAL_FONTINFO as *mut stbtt_fontinfo,
-                              &mut ascent as *mut i32,
-                              &mut descent as *mut i32, null_mut());
-        scale = stbtt_ScaleForPixelHeight(&GLOBAL_FONTINFO as *const stbtt_fontinfo, size);
-        let baseline = (ascent as f32 * scale ) as i32;
-
-        cwidth = (scale * (ascent - descent) as f32 ) as usize + 4;
-        cheight = (scale * (ascent - descent) as f32 ) as usize + 4;
-        char_buffer = vec![0u8; cwidth * cheight];
-
-        //render char to buffer
-        stbtt_GetCodepointBitmapBoxSubpixel(&GLOBAL_FONTINFO as *const stbtt_fontinfo, character as u8, scale, scale, 0.0,0.0,
-                                            &mut x0 as *mut i32,
-                                            &mut y0 as *mut i32,
-                                            &mut x1 as *mut i32,
-                                            &mut y1 as *mut i32);
-        stbtt_MakeCodepointBitmapSubpixel(  &GLOBAL_FONTINFO as *const stbtt_fontinfo,
-                                            &mut char_buffer[cwidth*(baseline + y0) as usize + (5 + x0) as usize ] as *mut u8,
-                                             x1-x0+2, y1-y0, cwidth as i32, scale, scale,0.0, 0.0, character as i32);
-    }
-    //println!("time to render to buffer {:?} {} {:x} {}", now.elapsed(), character, character as i32, size);
-    //now = time::Instant::now();
-
-    //NOTE
-    //If the character is invisible then don't render
-    if character as u8 > 0x20{   //render char_buffer to main_buffer
-        let buffer = canvas.buffer as *mut u32;
-        let gwidth = canvas.w as usize;
-        let gheight = canvas.h as usize;
-        let offset = (x as usize + y as usize * gwidth) as usize;
-        for i in 0..cheight{
-            for j in 0..cwidth{
-
-                if (j + i*gwidth + offset) > gwidth * gheight {continue;}
-
-                if j + x as usize  > gwidth {continue;}
-                if i + y as usize  > gheight {continue;}
-
-                let text_alpha = char_buffer[j + cwidth * (cheight - 1 - i)] as f32;
-                let a = color[3];
-                let r = (color[0] * text_alpha * a) as u32;
-                let g = (color[1] * text_alpha * a) as u32;
-                let b = (color[2] * text_alpha * a) as u32;
-
-                let dst_rgb = buffer.offset( (j + i*gwidth + offset) as isize);
-                let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
-                let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
-                let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (255.0 - text_alpha * a )/255.0 ) as u32;
-
-                *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r+_r << 16) + (g+_g << 8) + b+_b;
-            }
-        }
-    }
-    //println!("time to render to screen {:?}", now.elapsed());
-
-    let mut adv : i32 = 0;
-    let mut lft_br : i32 = 0; // NOTE: Maybe remove this
-    stbtt_GetCodepointHMetrics(&GLOBAL_FONTINFO as *const stbtt_fontinfo, character as i32, &mut adv as *mut i32, &mut lft_br as *mut i32);
-    return (adv as f32 * scale) as i32;
-}}
 
 fn getAdvance(character: char, size: f32)->i32{unsafe{
     if GLOBAL_FONTINFO.data == null_mut() {
@@ -554,57 +680,7 @@ fn getAdvance(character: char, size: f32)->i32{unsafe{
     let mut adv = 0;
     let scale = stbtt_ScaleForPixelHeight(&GLOBAL_FONTINFO as *const stbtt_fontinfo, size);
     stbtt_GetCodepointHMetrics(&GLOBAL_FONTINFO as *const stbtt_fontinfo, character as i32, &mut adv as *mut i32, null_mut());
-    return (adv as f32 * scale).round() as i32;
-}}
-
-fn drawString( canvas: &mut WindowsCanvas, string: &str, x: i32, y: i32,
-             color: [f32; 4], size: f32 ){
-    let mut offset = 0;
-    for it in string.chars(){
-        offset += drawChar(canvas, it, x + offset, y, color, size);
-    }
-}
-fn drawRect( canvas: &mut WindowsCanvas, rect: [i32; 4], color: [f32; 4], filled: bool ){unsafe{
-    let buffer = canvas.buffer as *mut u32;
-
-    let c_w = canvas.w as isize;
-    let c_h = canvas.h as isize;
-
-    let x = rect[0] as isize;
-    let y = rect[1] as isize;
-    let w = rect[2] as isize;
-    let h = rect[3] as isize;
-
-    let a = color[3];
-    let r = (color[0] * a * 255.0) as u32;
-    let g = (color[1] * a * 255.0) as u32;
-    let b = (color[2] * a * 255.0) as u32;
-
-    if x > 0 && y > 0 && x < c_w && y < c_h{
-        for _i in x..x+w{
-            let i = _i as isize;
-            for _j in y..y+h{
-                let j = _j as isize;
-                if i > c_w || j > c_h{
-                    continue;
-                }
-                let dst_rgb = buffer.offset( (i + c_w*j) as isize);
-                let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - a)) as u32;
-                let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - a)) as u32;
-                let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - a)) as u32;
-
-                if filled == false{
-                     if (_i - x) > 1 && (_i - x ) < w-2 &&
-                      (_j - y) > 1 && (_j - y ) < h-2{continue;}
-
-                     *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
-
-                } else {
-                    *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
-                }
-            }
-        }
-    }
+    return (adv as f32 * scale) as i32;
 }}
 
 
@@ -745,6 +821,7 @@ fn make_window(){unsafe{
                 //NOTE
                 //I'm not sure this should be here perhaps some where else...
                 mouseinfo.old_lbutton = mouseinfo.lbutton.clone();
+                mouseinfo.wheel_delta = 0;
                 while PeekMessageW(&mut message as *mut MSG, null_mut(), 0, 0, 0x0001) > 0{
                     {//NOTE: Handle mouse events
                         //Convert to the correct coordinates
@@ -754,6 +831,16 @@ fn make_window(){unsafe{
                         if message.message == winapi::um::winuser::WM_LBUTTONDOWN{ mouseinfo.lbutton = ButtonStatus::Down; }
                         else if message.message == winapi::um::winuser::WM_LBUTTONUP{ mouseinfo.lbutton = ButtonStatus::Up; }
                         else { mouseinfo.lbutton = ButtonStatus::Default; }
+
+                        //Mouse Wheel stuffs
+                        if message.message == winapi::um::winuser::WM_MOUSEWHEEL{
+                            let delta_wheel = winapi::um::winuser::GET_WHEEL_DELTA_WPARAM(message.wParam) as i16;
+                            mouseinfo.wheel += delta_wheel as isize /120;
+                            mouseinfo.wheel_delta = delta_wheel as i32 /120;
+                        }
+                        else{
+                        }
+
                     }
                     {//Handle text events
                         if message.message == winapi::um::winuser::WM_CHAR{
@@ -874,6 +961,9 @@ fn main() {
         }
     }
     unsafe { xinput::XInputEnable(1); }
+    tensorflow_init().expect("Tensorflow lib init problem.");
+
+
     make_window( );
 }
 
@@ -893,6 +983,8 @@ struct MouseInfo{
     y: i32,
     lbutton: ButtonStatus,
     old_lbutton: ButtonStatus,
+    wheel: isize,
+    wheel_delta: i32,
 }
 impl MouseInfo{
     pub fn new()->MouseInfo{
@@ -900,7 +992,9 @@ impl MouseInfo{
             x: 0,
             y: 0,
             lbutton: ButtonStatus::Default,
-            old_lbutton: ButtonStatus::Default
+            old_lbutton: ButtonStatus::Default,
+            wheel: 0,
+            wheel_delta: 0,
         }
     }
 }
@@ -1077,6 +1171,10 @@ impl TextBox{
     }}
 }
 
+
+
+
+
 #[derive(PartialEq, Debug)]
 enum TriggerType{
     Keyboard,
@@ -1090,7 +1188,97 @@ struct CameraTrigger{
     recently_updated: usize,
 }
 
+struct AiAppData{
+    init: bool,
+    glyph_model: TGBasicModel,
+}
+impl  AiAppData{
+    fn new()->AiAppData{
+        AiAppData{
+            init: false,
+            glyph_model: TGBasicModel::new(),
+        }
+    }
+}
+
+struct RectResultsStorage{
+    image_name: String,
+    rects : [[i32; 4]; 10],
+}
+impl RectResultsStorage{
+    fn new()->RectResultsStorage{
+        RectResultsStorage{
+            image_name: String::new(),
+            rects: [[0i32; 4]; 10],
+        }
+    }
+    fn write(){
+        //TODO
+    }
+}
+struct RectangleAppData{
+    init: bool,
+    active: bool,//TODO rename
+    xy_or_wh: bool,
+    nth_file: usize,
+    nth_player: usize, //TODO rename
+    bmp_box: [i32;4],
+    rects: [[i32;4]; 10],
+    _temp_rect: [i32;4],
+    folder_path_textbox: TextBox,
+    active_bmp: TGBitmap,
+    active_bmp_init: bool,
+    active_bmp_name: String,
+
+    storage : Vec<RectResultsStorage>,
+}
+impl RectangleAppData{
+    fn new()->RectangleAppData{
+        RectangleAppData{
+            init: false,
+            active: false,
+            xy_or_wh: true,
+            nth_file: 0usize,
+            nth_player: 0usize,
+            bmp_box: [250, 50, 650, 400],
+            rects: [[0i32;4]; 10],
+            _temp_rect: [0i32;4],
+            folder_path_textbox: TextBox::new(),
+            active_bmp: TGBitmap::new(0,0),
+            active_bmp_init: false,
+            active_bmp_name: String::new(),
+
+            storage : vec![],
+        }
+    }
+}
+
+enum MenuEnum{
+    screenshot,
+    ai,
+    rect,
+}
+
+struct MenuData{
+    actived: bool,
+    apps: Vec<String>,
+}
+impl MenuData{
+    fn new()->MenuData{
+        MenuData{
+            actived: false,
+            apps: vec!["screenshot".to_string(), "ai".to_string(), "rect".to_string()],
+        }
+    }
+}
+
 struct AppData{
+    //TODO
+    //Move screensot, ai, and other app setting and data are sectioned off
+    current_app: MenuEnum,
+    global_menu_data: MenuData,
+
+    //SCREENSHOTE DATA//
     capture_exe_textbox: TextBox,
     capture_exe_update_text: String,
     capture_exe_update_text_color: [f32; 4],
@@ -1125,6 +1313,12 @@ struct AppData{
     cameratrigger_is_updating: bool,
 
     temp_bmp: TGBitmap,
+    //SCREENSHOTE DATA//
+
+    //AI DATA//
+    ai_data: AiAppData,
+    rect_data: RectangleAppData,
+
 
     handle_dc: Option<WindowHandleDC>,
 }
@@ -1144,6 +1338,9 @@ impl AppData{
 
 
         AppData{
+            current_app: MenuEnum::rect,
+            global_menu_data: MenuData::new(),
+
             capture_exe_textbox: capture_exe_textbox,
             capture_exe_update_text: String::new(),
             capture_exe_update_text_color: [1.0, 1.0, 1.0, 0.0],
@@ -1181,14 +1378,513 @@ impl AppData{
 
             temp_bmp: loadBMP("assets/Untitled.bmp"),
 
+            ai_data: AiAppData::new(),
+            rect_data: RectangleAppData::new(),
+
             handle_dc: None,
         }
 
     }
 }
-
+fn menu(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration){unsafe{
+    let x = GLOBAL_BACKBUFFER.w-25;
+    let y = GLOBAL_BACKBUFFER.h-25;
+    drawRect(&mut GLOBAL_BACKBUFFER, [x, y, 20, 20],
+                                    [0.7, 0.7, 0.7, 1.0], true);
+    drawRect(&mut GLOBAL_BACKBUFFER, [x+2, y+15, 5, 5],
+                                    [0.9, 0.9, 0.9, 1.0], true);
+    drawRect(&mut GLOBAL_BACKBUFFER, [x+2, y+7, 5, 5],
+                                    [0.9, 0.9, 0.9, 1.0], true);
+    drawRect(&mut GLOBAL_BACKBUFFER, [x+9, y+15, 10, 5],
+                                    [0.9, 0.9, 0.9, 1.0], true);
+    drawRect(&mut GLOBAL_BACKBUFFER, [x+9, y+7, 10, 5],
+                                    [0.9, 0.9, 0.9, 1.0], true);
+    if in_rect(mouseinfo.x, mouseinfo.y, [x, y, 20, 20]) && mouseinfo.lbutton == ButtonStatus::Down{
+        app_data.global_menu_data.actived = true;
+    }
+    if app_data.global_menu_data.actived == true{
+        let x = 100;
+        let y = 50;
+        if in_rect(mouseinfo.x, mouseinfo.y, [x, y, 500, 500]) == false &&
+         mouseinfo.lbutton == ButtonStatus::Down && mouseinfo.old_lbutton != mouseinfo.lbutton{
+            app_data.global_menu_data.actived = false;
+        }
+        drawRect(&mut GLOBAL_BACKBUFFER, [x, y, 500, 500],
+                                    [0.5, 0.5, 0.5, 0.7], true);
+        drawString(&mut GLOBAL_BACKBUFFER, "Menu", x + 50, y + 400,
+         [0.9, 0.9, 0.0, 1.0], 42.0);
+        let screenshot_len = drawString(&mut GLOBAL_BACKBUFFER, "Screenshot APP", x + 50, y + 300,
+         [0.9, 0.9, 0.0, 1.0], 32.0);
+         if in_rect(mouseinfo.x, mouseinfo.y, [x + 50, y + 300, screenshot_len, 32]){
+            drawRect(&mut GLOBAL_BACKBUFFER, [x + 48, y+300, screenshot_len+4, 2],
+                                            [0.9, 0.9, 0.9, 1.0], true);
+            if mouseinfo.lbutton == ButtonStatus::Down{
+                app_data.current_app = MenuEnum::screenshot;
+            }
+         }
+        let ai_len = drawString(&mut GLOBAL_BACKBUFFER, "Ai APP", x + 50, y + 200,
+         [0.9, 0.9, 0.0, 1.0], 32.0);
+         if in_rect(mouseinfo.x, mouseinfo.y, [x + 50, y + 200, ai_len, 32]){
+            drawRect(&mut GLOBAL_BACKBUFFER, [x + 48, y+200, ai_len+4, 2],
+                                            [0.9, 0.9, 0.9, 1.0], true);
+            if mouseinfo.lbutton == ButtonStatus::Down{
+                app_data.current_app = MenuEnum::ai;
+            }
+         }
+        let rect_len = drawString(&mut GLOBAL_BACKBUFFER, "Rect APP", x + 50, y + 100,
+         [0.9, 0.9, 0.0, 1.0], 32.0);
+         if in_rect(mouseinfo.x, mouseinfo.y, [x + 50, y + 100, rect_len, 32]){
+            drawRect(&mut GLOBAL_BACKBUFFER, [x + 48, y+100, rect_len+4, 2],
+                                            [0.9, 0.9, 0.9, 1.0], true);
+            if mouseinfo.lbutton == ButtonStatus::Down{
+                app_data.current_app = MenuEnum::rect;
+            }
+         }
+    }
+}}
 fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{
+    match app_data.current_app{
+        MenuEnum::screenshot => {
+            return app_screencapture(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+        },
+        MenuEnum::ai => {
+            return app_ai(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+        },
+        MenuEnum::rect => {
+            return app_rectangle(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+        },
+    }
+    return 0;
+}
+fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
+    drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.2, 0.2, 0.2, 1.0], true);
+    drawString(&mut GLOBAL_BACKBUFFER, "Something about a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
+
+    let rectapp_data = &mut app_data.rect_data;
+    if !rectapp_data.init{
+        rectapp_data.init = true;
+        ///////////////////
+        //Setup TextBox
+        rectapp_data.folder_path_textbox.x = 250;
+        rectapp_data.folder_path_textbox.y = 10;
+        rectapp_data.folder_path_textbox.max_char = 80;
+        rectapp_data.folder_path_textbox.max_render_length = 600;
+        rectapp_data.folder_path_textbox.text_color = [ 0.8, 0.8, 0.8, 0.7];
+        rectapp_data.folder_path_textbox.text_buffer = "temp".to_string();
+    }
+    {//Iterate to a new BMP
+        if textinfo.character == 'd'{
+            rectapp_data.nth_file += 1;
+            rectapp_data.active_bmp_init = false;
+        } else if textinfo.character == 'a' {
+            if rectapp_data.nth_file > 0 { rectapp_data.nth_file -= 1; }
+            rectapp_data.active_bmp_init = false;
+        }
+    }
+    {//TextBox stuffs
+        rectapp_data.folder_path_textbox.update(keyboardinfo, textinfo, mouseinfo);
+        drawString(&mut GLOBAL_BACKBUFFER, "Path: ", 185, 8, [0.8, 0.8, 0.8, 1.0], 32.0);
+        let mut _path = std::path::Path::new(&rectapp_data.folder_path_textbox.text_buffer);
+        if _path.exists() &&
+           _path.is_dir() {
+
+            let mut ith_bmp = 0;
+            for entry in std::fs::read_dir(_path).unwrap(){
+                let entry = entry.expect("Trying to read dir for bmps");
+
+                if entry.path().is_file(){
+                    let _p = entry.path();
+                    if entry.path().extension().unwrap() == "bmp"{
+                        if rectapp_data.nth_file == ith_bmp &&
+                           rectapp_data.active_bmp_init == false{
+
+                            rectapp_data.active_bmp_init = true;
+                            rectapp_data.active_bmp_name = _p.to_str().unwrap().to_string();
+                            let _bmp = loadBMP(&rectapp_data.active_bmp_name);
+                            let w = rectapp_data.bmp_box[2];
+                            let h = rectapp_data.bmp_box[3];
+                            rectapp_data.active_bmp =  resizeBMP( &_bmp, w, h);
+                            break;
+                        }
+                        ith_bmp += 1;
+                    }
+                }
+
+            }
+        }
+        rectapp_data.folder_path_textbox.draw(time_instance.subsec_nanos() as f32);
+    }
+
+    //Draws active bmp, associated outline rect
+    {
+        drawBMP(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp, rectapp_data.bmp_box[0],
+             rectapp_data.bmp_box[1], 1.0, None, None);
+        drawRect(&mut GLOBAL_BACKBUFFER, rectapp_data.bmp_box, [1.0;4], false);
+        drawString(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp_name, 700, 30, [0.0, 1.0, 0.0, 0.75], 20.0);
+    }
+    //TODO
+    //+ iterate through files
+    //+ Save results
+    {//Update active "player" rect
+        let mut index = rectapp_data.nth_player as i32 - mouseinfo.wheel_delta ;
+        if index > 9 {
+            index = 0;
+        } else if index < 0{
+            index = 9;
+        }
+        rectapp_data.nth_player = index as usize;
+    }
+
+    let mut nth_player = rectapp_data.nth_player;
+    if in_rect(mouseinfo.x, mouseinfo.y, rectapp_data.bmp_box){//Draw rect and something else
+        if mouseinfo.old_lbutton == ButtonStatus::Down && mouseinfo.lbutton == ButtonStatus::Up{
+            if rectapp_data.xy_or_wh {
+                rectapp_data.active = true;
+                rectapp_data.rects[nth_player][0] = mouseinfo.x;
+                rectapp_data.rects[nth_player][1] = mouseinfo.y;
+                rectapp_data._temp_rect[0] = mouseinfo.x;
+                rectapp_data._temp_rect[1] = mouseinfo.y;
+            } else{
+                rectapp_data.active = false;
+                rectapp_data._temp_rect = [0i32;4];
+                rectapp_data.nth_player += 1;
+            }
+            rectapp_data.xy_or_wh = !rectapp_data.xy_or_wh;
+        }
+        if rectapp_data.active{
+            let mut _xywh = rectapp_data._temp_rect.clone();
+            _xywh[2] = (rectapp_data._temp_rect[0] - mouseinfo.x).abs();
+            _xywh[3] = (rectapp_data._temp_rect[1] - mouseinfo.y).abs();
+            if mouseinfo.x < rectapp_data._temp_rect[0]{
+                _xywh[0] = mouseinfo.x;
+            }
+            if mouseinfo.y < rectapp_data._temp_rect[1]{
+                _xywh[1] = mouseinfo.y;
+            }
+            drawRect(&mut GLOBAL_BACKBUFFER, _xywh, [1.0, 1.0, 1.0, 1.0], false);
+            rectapp_data.rects[nth_player] = _xywh;
+        }
+    }
+    //Draw rect lables
+    for i in 0..rectapp_data.rects.len() {
+        let _i = i as i32;
+        let mut color = [1.0f32; 4];
+        if rectapp_data.nth_player == i {
+            color[0] = 0.0;
+        }
+        drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?} {:?}", i, &rectapp_data.rects[i]) ,10, 400 - _i*23, color, 24.0);
+        if i == 0 {
+            drawString(&mut GLOBAL_BACKBUFFER, "P1" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
+        } else if i == 1{
+            drawString(&mut GLOBAL_BACKBUFFER, "P2" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
+        }
+    }
+    //Draw all stable rects
+    for i in 0..rectapp_data.rects.len(){
+        if rectapp_data.nth_player == i { continue; }
+        drawRect(&mut GLOBAL_BACKBUFFER, rectapp_data.rects[i], [0.0, 1.0, 1.0, 0.7], false);
+    }
+    drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?}", rectapp_data.xy_or_wh) ,10, 170, [1.0, 1.0, 1.0, 1.0], 24.0);
+    return 0;
+}}
+
+fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
+    //TODO
+    //Breaks when you exit
+
+    let mut ai_data = &mut app_data.ai_data;
+    if ai_data.init == false{
+        ai_data.init = true;
+        ai_data.glyph_model.load_graph_from_file("assets/ai_models/glyph_NN.pb", None).expect("model load failed");
+        println!("{:?}", ai_data.glyph_model.get_input_dimensions());
+        println!("{:?}", ai_data.glyph_model.get_output_dimensions());
+    }
+    //NOTE
+    //Just coloring the screen somthing special no biggy
+    drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.25, 0.21, 0.2, 1.0], true);
+
+    if !app_data.handle_dc.is_some(){
+        //TODO
+        //This may need to be specific or something we are using info prevy to a different app
+        //Might also what to allow the user to set this  maybe in the future since you might just
+        // move the the screencaputer app through the menu.  That is a bit of a pain, but this is
+        // an upgrade for the future
+        if foundWindow(&app_data.capture_exe_textbox.text_buffer){
+            app_data.handle_dc = Some(load_handle_dc(&app_data.capture_exe_textbox.text_buffer));
+        }
+    }
+    else {
+
+        let screen = screen_shot(app_data.handle_dc.as_ref().expect("App data dc could not be taken as ref"),
+                                1, "", "", false);
+
+
+        fn get_glyph_bmp_data(glyph_window: &[usize], intensity_buffer: &mut Vec::<f32>,
+                            sum_col_int: &mut Vec::<f32>, sum_row_int: &mut Vec::<f32>,
+                            screen: &[TGBitmap], debug_coord: &[i32]){unsafe{
+            for j in 0..glyph_window[3]{//Iterate over the height
+                for i in 0..glyph_window[2]{//Iterate over the width
+                    let x = 4 * (i + glyph_window[0]);
+                    let y = 4 * (glyph_window[1] + j);
+
+                    let r = screen[0].rgba[x + y * screen[0].info_header.width as usize + 2] as f32 / 255.;
+                    let g = screen[0].rgba[x + y * screen[0].info_header.width as usize + 1] as f32 / 255.;
+                    let b = screen[0].rgba[x + y * screen[0].info_header.width as usize + 0] as f32 / 255.;
+                    let a = screen[0].rgba[x + y * screen[0].info_header.width as usize + 3] as f32 / 255.;
+
+                    let intensity = (r + g + b) / 3.0;
+                    intensity_buffer.push(intensity.powf(2.0));
+                    sum_col_int[i] += intensity;
+                    sum_row_int[j] += intensity;
+                    //NOTE
+                    //this is for debugging purposes
+                    {//draw enhanced player one name
+                        let _x = debug_coord[0];
+                        let _y = debug_coord[1] - 60;
+                        drawRect(&mut GLOBAL_BACKBUFFER, [_x + 2*i as i32, _y + 2*j as i32, 2, 2], [r, g, b, 1.0], true);
+                    }
+                }
+            }
+        }}
+        let p1_coor_glyph_ai = [20, 400];
+        let p1_text_window = [ 150, 749-95-23, 150, 23];
+        let mut p1_intensity_buffer = Vec::<f32>::with_capacity(p1_text_window[2] * p1_text_window[3]);
+        let mut p1_glyph_locations = Vec::<usize>::new();
+        let mut p1_sum_row_int = vec![0.0f32; p1_text_window[3]];
+        let mut p1_sum_col_int = vec![0.0f32; p1_text_window[2]];
+        get_glyph_bmp_data(&p1_text_window, &mut p1_intensity_buffer, &mut p1_sum_col_int, &mut p1_sum_row_int, &screen, &p1_coor_glyph_ai);
+
+        struct LocGlyphSettings{
+            min_abs: f32,
+            min_sum_intensity: f32,
+            min_width: i32,
+        }
+
+        fn find_glyphs(sum_col_int: &Vec<f32>, glyph_brackets: &mut Vec<usize>, settings: &LocGlyphSettings){//finding the glyph brackets
+            let _len = sum_col_int.len();
+            for (i, it) in sum_col_int[0.._len-3].iter().enumerate(){
+                let _abs = ((sum_col_int[i+1] - it) + (sum_col_int[i+2] - sum_col_int[i+1])).abs();
+                if _abs > settings.min_abs && sum_col_int[i+1] < settings.min_sum_intensity{
+                    glyph_brackets.push(i+1);
+                }
+            }
+            let mut _pop = vec![];
+            for i in 0..glyph_brackets.len() - 1{
+                if (glyph_brackets[i] as i32 - glyph_brackets[i+1] as i32).abs() < settings.min_width{
+                    _pop.push(i)
+                }
+            }
+            for (i, it) in _pop.iter().enumerate(){
+                glyph_brackets.remove(it - i);
+            }
+        }
+        let settings = LocGlyphSettings{
+            min_abs: 2.5,
+            min_sum_intensity: 15.0,
+            min_width: 4,
+        };
+        let mut p1_glyph_brackets = vec![];
+        find_glyphs(&p1_sum_col_int, &mut p1_glyph_brackets, &settings);
+
+        let p2_coor_glyph_ai = [20, 220];
+        let p2_text_window = [ 980, 749-95-23, 150, 23];//TODO Load of settings file
+        let mut p2_intensity_buffer = Vec::<f32>::with_capacity(p2_text_window[2] * p2_text_window[3]);
+        let mut p2_glyph_locations = Vec::<usize>::new();
+        let mut p2_sum_row_int = vec![0.0f32; p2_text_window[3]];
+        let mut p2_sum_col_int = vec![0.0f32; p2_text_window[2]];
+        get_glyph_bmp_data(&p2_text_window, &mut p2_intensity_buffer, &mut p2_sum_col_int, &mut p2_sum_row_int, &screen, &p2_coor_glyph_ai);
+
+        let mut p2_glyph_brackets = vec![];
+        find_glyphs(&p2_sum_col_int, &mut p2_glyph_brackets, &settings);
+
+        //NOTE
+        //this is debug material
+        {//Draw glyph debug info
+            //TODO
+            //Clean this shit up all these damn offsets and shit .... :(
+            //Might not want these things hard coded... idk maybe we do.
+            let _yoffset = -180;
+            drawRect(&mut GLOBAL_BACKBUFFER, [p1_coor_glyph_ai[0]-2, p1_coor_glyph_ai[1] + _yoffset+30, 304, 110-30],
+                                            [0.3, 0.3, 0.3, 1.0], true);
+            for (i,it) in p1_sum_col_int.iter().enumerate(){//Draws the curve
+                let _x = 2*i as i32 + p1_coor_glyph_ai[0];
+                let _y = (*it * 5.0) as i32 + p1_coor_glyph_ai[1] + _yoffset;
+                drawRect(&mut GLOBAL_BACKBUFFER, [_x, _y, 2, 2], [0.1, 0.6, 0.6, 1.0], true);
+            }
+            for it in p1_glyph_brackets.iter(){//Draws the glyph brackets
+                let _x = 2*(*it) as i32 + p1_coor_glyph_ai[0];
+                for j in 0..16{
+                    let _y = (j as f32 * 5.0) as i32 + p1_coor_glyph_ai[1] - 150;
+                    drawRect(&mut GLOBAL_BACKBUFFER, [_x, _y, 2, 3], [0.9, 0.9, 0.9, 0.6], true);
+                }
+            }
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [p2_coor_glyph_ai[0]-2, p2_coor_glyph_ai[1] + _yoffset+30, 304, 110-30],
+                                            [0.3, 0.3, 0.3, 1.0], true);
+            for (i,it) in p2_sum_col_int.iter().enumerate(){//Draws the curve
+                let _x = 2*i as i32 + p2_coor_glyph_ai[0];
+                let _y = (*it * 5.0) as i32 + p2_coor_glyph_ai[1] + _yoffset;
+                drawRect(&mut GLOBAL_BACKBUFFER, [_x, _y, 2, 2], [0.1, 0.6, 0.6, 1.0], true);
+            }
+            for it in p2_glyph_brackets.iter(){//Draws the glyph brackets
+                let _x = 2*(*it) as i32 + p2_coor_glyph_ai[0];
+                for j in 0..16{
+                    let _y = (j as f32 * 5.0) as i32 + p2_coor_glyph_ai[1] - 150;
+                    drawRect(&mut GLOBAL_BACKBUFFER, [_x, _y, 2, 3], [0.9, 0.9, 0.9, 0.6], true);
+                }
+            }
+        }
+
+        for (glyph_i, glyph_iter) in p1_glyph_brackets.iter().enumerate(){
+            if glyph_i == 0 { continue; }
+            let mut arr = vec![0.0f32; 1*28*28*1];
+            let glyph_pos1 = p1_glyph_brackets[glyph_i - 1];
+            // the two is an offset used in responce to a defect in the glyph detection algo
+            //should be be removed and reaplaced by a better algo
+            let glyph_pos2 = *glyph_iter;
+
+            //CLEANUP
+            //We had to flip the letter here it was a pain in the ass and this clode block needs be cleaned up
+            //We also want to render all of the glyphs associated with the character name
+
+            //TODO finish making this a function
+            //fn predict_and_debug(player_text_window: &[i32], player_intensity_buffer: &[f32])
+            {
+                let mut cursor = 0;
+                //I think this is a reflection about both x and y
+                //It might be a good idea to explore all the effects of rev on 2d matrix indices
+                for (i, it) in (0..20).rev().enumerate(){
+                    //NOTE
+                    //The minus one is to correct for something in the find glyph algo
+                    for (j, jt) in ((glyph_pos1 - 1)..glyph_pos2).rev().enumerate(){
+                        let _temp = ((28 - (glyph_pos2 - (glyph_pos1-1))) as f32 / 2.0 ) as usize;
+                        cursor = (i+3)*28 + (j + _temp) ;
+                        let _cursor = it*p1_text_window[2] + jt;
+                        arr[cursor] = p1_intensity_buffer[_cursor];
+                    }
+                }
+                //NOTE
+                //More debugging rendering
+                let _offsetx = p1_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
+                let _offsety = p1_coor_glyph_ai[1]-170;
+                for i in (0..28){
+                    for j in (0..28){
+                        let _r = arr[(27-i) + (27-j)*28];
+                        drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                    }
+                }
+            }
+            let mut _max_arg = 0;
+            let mut _max = 0.0;
+
+            for (i, it) in ai_data.glyph_model.predict(&mut arr, 1).unwrap().iter().enumerate(){
+                if *it > _max{
+                    _max_arg = i;
+                    _max = *it;
+                }
+            }
+
+            //let _offsetx = p1_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
+            let _offsety = p1_coor_glyph_ai[1]-190;
+            if _max_arg >= 10{
+                let str_pred = format!("{} {:.2} ", std::char::from_u32( _max_arg as u32 + 55).unwrap(), _max);
+                drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+            else {
+                let str_pred = format!("{} {:.2} ", _max_arg, _max);
+                drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+        }
+        for (glyph_i, glyph_iter) in p2_glyph_brackets.iter().enumerate(){
+            if glyph_i == 0 { continue; }
+            let mut arr = vec![0.0f32; 1*28*28*1];
+            let glyph_pos1 = p2_glyph_brackets[glyph_i - 1];
+            let glyph_pos2 = *glyph_iter;
+
+            //CLEANUP
+            //We had to flip the letter here it was a pain in the ass and this clode block needs be cleaned up
+            //We also want to render all of the glyphs associated with the character name
+
+            //TODO finish making this a function
+            //fn predict_and_debug(player_text_window: &[i32], player_intensity_buffer: &[f32])
+            {
+                let mut cursor = 0;
+                //I think this is a reflection about both x and y
+                //It might be a good idea to explore all the effects of rev on 2d matrix indices
+                for (i, it) in (0..20).rev().enumerate(){
+                    for (j, jt) in (glyph_pos1..glyph_pos2).rev().enumerate(){
+                        let _temp = ((28 - (glyph_pos2 - glyph_pos1)) as f32 / 2.0 ) as usize;
+                        cursor = (i+3)*28 + (j + _temp) ;
+                        let _cursor = it*p2_text_window[2] + jt;
+                        arr[cursor] = p2_intensity_buffer[_cursor];
+                    }
+                }
+                //NOTE
+                //More debugging rendering
+                let _offsetx = p2_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
+                let _offsety = p2_coor_glyph_ai[1]-170;
+                for i in (0..28){
+                    for j in (0..28){
+                        let _r = arr[(27-i) + (27-j)*28];
+                        drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                    }
+                }
+            }
+            let mut _max_arg = 0;
+            let mut _max = 0.0;
+
+            //Determine index of best prediction
+            for (i, it) in ai_data.glyph_model.predict(&mut arr, 1).unwrap().iter().enumerate(){
+                if *it > _max{
+                    _max_arg = i;
+                    _max = *it;
+                }
+            }
+
+            //Draw results of the prediction
+            let _offsety = p2_coor_glyph_ai[1]-190;
+            if _max_arg >= 10{
+                let str_pred = format!("{} {:.2} ", std::char::from_u32( _max_arg as u32 + 55).unwrap(), _max);
+                drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+            else {
+                let str_pred = format!("{} {:.2} ", _max_arg, _max);
+                drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+        }
+        drawBMP(&mut GLOBAL_BACKBUFFER, &screen[0], 330, 100, 1.0, Some(640), Some(360) );
+    }
+    drawString(&mut GLOBAL_BACKBUFFER, "Something about an ai sailor", 350, 460, [1.0, 1.0, 1.0, 1.0], 40.0);
+
+
+    let coor_glyph_ai = [20, 400];
+    drawString(&mut GLOBAL_BACKBUFFER, "Toggle ai:", 20, 450, [1.0, 1.0, 1.0, 1.0], 24.0);
+    drawString(&mut GLOBAL_BACKBUFFER, " [+] glyph classification", coor_glyph_ai[0], coor_glyph_ai[1], [1.0, 1.0, 1.0, 1.0], 20.0);
+
+    drawRect(&mut GLOBAL_BACKBUFFER, [330, 100, 640, 360], [0.8, 0.8, 0.8, 1.0], false);
+
+}
+    menu(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+    return 0;
+}
+fn rotate_90_vertflip( arr: &[f32], stride: usize)->Vec<f32>{
+    //TODO
+    //This crap needs to be included in the original definition creating the sample used for the glyph prediction.
+    let mut rt = vec![];
+    for i in (0..stride).rev(){
+        for j in 0..stride{
+            rt.push(arr[i + j*stride])
+        }
+    }
+    return rt;
+}
+fn app_screencapture(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
+
 
     drawRect(&mut GLOBAL_BACKBUFFER, [20, 25, 30, 30], [1.0, 0.0, (frames%255) as f32 / 255.0, 1.0], true);
 
@@ -1421,7 +2117,7 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         drawBMP(&mut GLOBAL_BACKBUFFER, &app_data.keyboard_bmp, 100, 150, alpha_kb, None, None);
         drawString(&mut GLOBAL_BACKBUFFER, &format!("CameraTrigger:      id= {}   trigger_type= {:?}", app_data.cameratrigger.id, app_data.cameratrigger.trigger_type),
                     25, 120, [0.7, 0.7, 0.7, 1.0], 24.0);
-        drawString(&mut GLOBAL_BACKBUFFER, &format!("Frames since updata: {} ", app_data.cameratrigger.recently_updated),
+        drawString(&mut GLOBAL_BACKBUFFER, &format!("Frames since update: {} ", app_data.cameratrigger.recently_updated),
                     25, 96, [0.7, 0.7, 0.7, 1.0], 24.0);
     }
 
@@ -1475,9 +2171,11 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                //TODO
                //change screenshot number to a variable that changes or resets when the name of the
                //screen shot is changed
-               let mut arr = screen_shot(app_data.handle_dc.as_ref().expect("App data dc could not be taken as a reference."), app_data.screenshot_buffer.len() as i32,
+
+               let n_shots_to_capture = app_data.number_of_shots_to_take_textbox.text_buffer.parse::<i32>().expect("Number of screenshots to be taken is not a i32");
+               let mut arr = screen_shot(app_data.handle_dc.as_ref().expect("App data dc could not be taken as a reference."), n_shots_to_capture,
                                          &app_data.image_prepend_name_textbox.text_buffer,
-                                         &app_data.root_folder_textbox.text_buffer);
+                                         &app_data.root_folder_textbox.text_buffer, true);
                app_data.screenshot_buffer.append(&mut arr);
                app_data.currently_rendering_index = app_data.screenshot_buffer.len() - 1;
         }
@@ -1563,6 +2261,8 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         drawRect(&mut GLOBAL_BACKBUFFER, [40, 50, 10, 10], [1.0, 0.5, (frames%255) as f32 / 255.0, 1.0], false);
     }
     drawBMP(&mut GLOBAL_BACKBUFFER, &app_data.temp_bmp, 20, 20, 1.0, None, None);
+
+    menu(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
     return 0;
 }}
 

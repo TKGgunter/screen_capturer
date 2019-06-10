@@ -1,0 +1,8 @@
+[package]
+name = "tensorflow-sys-tools"
+version = "0.1.0"
+authors = ["TKGgunter <thothgunter@live.com>"]
+edition = "2018"
+
+[dependencies]
+winapi = { version = "0.3.6", features = ["winuser", "xinput", "windef", "wingdi", "winnt", "libloaderapi", "memoryapi", "processenv", "errhandlingapi"] }
