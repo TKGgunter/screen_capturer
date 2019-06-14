@@ -1212,9 +1212,6 @@ impl RectResultsStorage{
             rects: [[0i32; 4]; 10],
         }
     }
-    fn write(){
-        //TODO
-    }
 }
 struct RectangleAppData{
     init: bool,
@@ -1223,7 +1220,9 @@ struct RectangleAppData{
     nth_file: usize,
     nth_player: usize, //TODO rename
     bmp_box: [i32;4],
+    temp_bmp_w_h: [i32;2],
     rects: [[i32;4]; 10],
+    _rects: [[i32;4]; 10],
     _temp_rect: [i32;4],
     folder_path_textbox: TextBox,
     active_bmp: TGBitmap,
@@ -1241,7 +1240,9 @@ impl RectangleAppData{
             nth_file: 0usize,
             nth_player: 0usize,
             bmp_box: [250, 50, 650, 400],
+            temp_bmp_w_h: [0,0],
             rects: [[0i32;4]; 10],
+            _rects: [[0i32;4]; 10],
             _temp_rect: [0i32;4],
             folder_path_textbox: TextBox::new(),
             active_bmp: TGBitmap::new(0,0),
@@ -1250,6 +1251,24 @@ impl RectangleAppData{
 
             storage : vec![],
         }
+    }
+    fn write(&self, filename: &str){
+        let mut contents = String::new();
+        contents += &format!{"#IMAGE TABLE"};
+        contents += "image hash, ";
+        for i in 0..self.storage.len(){
+            contents += &format!{"x{0}, y{0}, w{0}, h{0}", i};
+        }
+        let mut image_hash = 0;
+        for it in self.storage.iter(){
+            contents += &format!("{}, ", image_hash);
+            for jt in it.rects.iter(){
+                contents += &format!{"{}, {},{},{}, {}, ", image_hash, jt[0], jt[1], jt[2], jt[3]};
+            }
+            contents += "\n";
+        }
+        let mut f = File::create(&format!("{}.txt",filename)).expect("Could not create rect result storage file");
+        f.write(contents.as_bytes());
     }
 }
 
@@ -1318,7 +1337,6 @@ struct AppData{
     //AI DATA//
     ai_data: AiAppData,
     rect_data: RectangleAppData,
-
 
     handle_dc: Option<WindowHandleDC>,
 }
@@ -1504,6 +1522,7 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                             rectapp_data.active_bmp_init = true;
                             rectapp_data.active_bmp_name = _p.to_str().unwrap().to_string();
                             let _bmp = loadBMP(&rectapp_data.active_bmp_name);
+                            rectapp_data.temp_bmp_w_h = [_bmp.info_header.width, _bmp.info_header.height];
                             let w = rectapp_data.bmp_box[2];
                             let h = rectapp_data.bmp_box[3];
                             rectapp_data.active_bmp =  resizeBMP( &_bmp, w, h);
@@ -1526,8 +1545,8 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         drawString(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp_name, 700, 30, [0.0, 1.0, 0.0, 0.75], 20.0);
     }
     //TODO
-    //+ iterate through files
-    //+ Save results
+    //+ store results
+    //+ save results with coverted coordinates
     {//Update active "player" rect
         let mut index = rectapp_data.nth_player as i32 - mouseinfo.wheel_delta ;
         if index > 9 {
@@ -1566,6 +1585,29 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             }
             drawRect(&mut GLOBAL_BACKBUFFER, _xywh, [1.0, 1.0, 1.0, 1.0], false);
             rectapp_data.rects[nth_player] = _xywh;
+        }
+    }
+    {//convert rect to _rect with bmp coordinates
+        #[inline]
+        fn convert_rect(input: [i32;4], original_w: i32, original_h: i32, post_w: i32, post_h: i32)->[i32;4]{
+            let mut rt = [0;4];
+            let o_w = original_w as f32;
+            let o_h = original_h as f32;
+
+            let p_w = post_w as f32;
+            let p_h = post_h as f32;
+
+            //TODO
+            //TEST ME
+            rt[0] = (input[0] as f32 * o_w/p_w) as i32;
+            rt[1] = (input[1] as f32 * o_h/p_h) as i32;
+            rt[2] = (input[2] as f32 * o_w/p_w) as i32;
+            rt[3] = (input[3] as f32 * o_h/p_h) as i32;
+            return rt;
+        }
+        for (i,it) in rectapp_data.rects.iter().enumerate(){
+            rectapp_data._rects[i] = convert_rect(*it, rectapp_data.temp_bmp_w_h[0], rectapp_data.temp_bmp_w_h[1],
+                                                        rectapp_data.bmp_box[2], rectapp_data.bmp_box[3]);
         }
     }
     //Draw rect lables
