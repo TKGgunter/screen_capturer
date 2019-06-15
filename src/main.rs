@@ -1204,12 +1204,14 @@ impl  AiAppData{
 struct RectResultsStorage{
     image_name: String,
     rects : [[i32; 4]; 10],
+    app_rects : [[i32; 4]; 10],
 }
 impl RectResultsStorage{
     fn new()->RectResultsStorage{
         RectResultsStorage{
             image_name: String::new(),
             rects: [[0i32; 4]; 10],
+            app_rects: [[0i32; 4]; 10],
         }
     }
 }
@@ -1242,7 +1244,7 @@ impl RectangleAppData{
             bmp_box: [250, 50, 650, 400],
             temp_bmp_w_h: [0,0],
             rects: [[0i32;4]; 10],
-            _rects: [[0i32;4]; 10],
+            _rects: [[0i32;4]; 10],//TODO fix name
             _temp_rect: [0i32;4],
             folder_path_textbox: TextBox::new(),
             active_bmp: TGBitmap::new(0,0),
@@ -1252,18 +1254,41 @@ impl RectangleAppData{
             storage : vec![],
         }
     }
+    fn set_rects(&mut self, image_name: &str){
+        let mut in_storage = false;
+        for it in self.storage.iter(){
+            if it.image_name == image_name {
+                 self._rects = it.rects;
+                 self.rects = it.app_rects;
+                 return;
+             } //Change to replace
+        }
+
+    }
+    fn store(&mut self, image_name: &str){
+        let mut in_storage = false;
+        for it in self.storage.iter_mut(){
+            if it.image_name == image_name {
+                 it.rects = self._rects;
+                 it.app_rects = self.rects;
+                 return;
+             } //Change to replace
+        }
+        self.storage.push( RectResultsStorage{image_name: image_name.to_string(),
+                                              rects: self._rects,
+                                              app_rects: self.rects} );
+    }
     fn write(&self, filename: &str){
         let mut contents = String::new();
-        contents += &format!{"#IMAGE TABLE"};
         contents += "image hash, ";
-        for i in 0..self.storage.len(){
+        for i in 0..self.rects.len(){
             contents += &format!{"x{0}, y{0}, w{0}, h{0}", i};
         }
-        let mut image_hash = 0;
+        contents += "\n";
         for it in self.storage.iter(){
-            contents += &format!("{}, ", image_hash);
+            contents += &it.image_name;
             for jt in it.rects.iter(){
-                contents += &format!{"{}, {},{},{}, {}, ", image_hash, jt[0], jt[1], jt[2], jt[3]};
+                contents += &format!{"{},{},{}, {}, ", jt[0], jt[1], jt[2], jt[3]};
             }
             contents += "\n";
         }
@@ -1480,6 +1505,9 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
     drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.2, 0.2, 0.2, 1.0], true);
     drawString(&mut GLOBAL_BACKBUFFER, "Something about a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
+    //TODO
+    //usage instructions
+
 
     let rectapp_data = &mut app_data.rect_data;
     if !rectapp_data.init{
@@ -1494,6 +1522,8 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         rectapp_data.folder_path_textbox.text_buffer = "temp".to_string();
     }
     {//Iterate to a new BMP
+        //TODO
+        //store results so far and reset _rects and rects
         if textinfo.character == 'd'{
             rectapp_data.nth_file += 1;
             rectapp_data.active_bmp_init = false;
@@ -1505,7 +1535,8 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     {//TextBox stuffs
         rectapp_data.folder_path_textbox.update(keyboardinfo, textinfo, mouseinfo);
         drawString(&mut GLOBAL_BACKBUFFER, "Path: ", 185, 8, [0.8, 0.8, 0.8, 1.0], 32.0);
-        let mut _path = std::path::Path::new(&rectapp_data.folder_path_textbox.text_buffer);
+        let _path = rectapp_data.folder_path_textbox.text_buffer.clone();
+        let mut _path = std::path::Path::new(&_path);
         if _path.exists() &&
            _path.is_dir() {
 
@@ -1519,6 +1550,17 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                         if rectapp_data.nth_file == ith_bmp &&
                            rectapp_data.active_bmp_init == false{
 
+                            /////////////////////////////////
+                            //Resetting data
+                            rectapp_data.nth_player = 0;
+                            if rectapp_data.active_bmp_name.len() > 0 {
+                                let _name = rectapp_data.active_bmp_name.clone();
+                                rectapp_data.store(&_name);
+                                rectapp_data._rects = [[0;4];10];
+                                rectapp_data.rects = [[0;4];10];
+                            }
+                            /////////////////////////////////
+
                             rectapp_data.active_bmp_init = true;
                             rectapp_data.active_bmp_name = _p.to_str().unwrap().to_string();
                             let _bmp = loadBMP(&rectapp_data.active_bmp_name);
@@ -1526,6 +1568,14 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                             let w = rectapp_data.bmp_box[2];
                             let h = rectapp_data.bmp_box[3];
                             rectapp_data.active_bmp =  resizeBMP( &_bmp, w, h);
+
+                            /////////////////////////////////
+                            //Setting stored data
+                            let _name = rectapp_data.active_bmp_name.clone();
+                            rectapp_data.set_rects(&_name);
+                            /////////////////////////////////
+
+
                             break;
                         }
                         ith_bmp += 1;
@@ -1589,7 +1639,7 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     }
     {//convert rect to _rect with bmp coordinates
         #[inline]
-        fn convert_rect(input: [i32;4], original_w: i32, original_h: i32, post_w: i32, post_h: i32)->[i32;4]{
+        fn convert_rect(input: [i32;4], original_w: i32, original_h: i32, post_w: i32, post_h: i32, offset_x: i32, offset_y: i32)->[i32;4]{
             let mut rt = [0;4];
             let o_w = original_w as f32;
             let o_h = original_h as f32;
@@ -1597,27 +1647,26 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             let p_w = post_w as f32;
             let p_h = post_h as f32;
 
-            //TODO
-            //TEST ME
-            rt[0] = (input[0] as f32 * o_w/p_w) as i32;
-            rt[1] = (input[1] as f32 * o_h/p_h) as i32;
+            rt[0] = if input[0] !=0 { ((input[0] - offset_x) as f32 * o_w/p_w) as i32 }  else { 0 };
+            rt[1] = if input[1] != 0 {((input[1] - offset_y) as f32 * o_h/p_h) as i32 } else { 0 };
             rt[2] = (input[2] as f32 * o_w/p_w) as i32;
             rt[3] = (input[3] as f32 * o_h/p_h) as i32;
             return rt;
         }
         for (i,it) in rectapp_data.rects.iter().enumerate(){
             rectapp_data._rects[i] = convert_rect(*it, rectapp_data.temp_bmp_w_h[0], rectapp_data.temp_bmp_w_h[1],
-                                                        rectapp_data.bmp_box[2], rectapp_data.bmp_box[3]);
+                                                        rectapp_data.bmp_box[2], rectapp_data.bmp_box[3],
+                                                        rectapp_data.bmp_box[0], rectapp_data.bmp_box[1]);
         }
     }
     //Draw rect lables
-    for i in 0..rectapp_data.rects.len() {
+    for i in 0..rectapp_data._rects.len() {
         let _i = i as i32;
         let mut color = [1.0f32; 4];
         if rectapp_data.nth_player == i {
             color[0] = 0.0;
         }
-        drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?} {:?}", i, &rectapp_data.rects[i]) ,10, 400 - _i*23, color, 24.0);
+        drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?} {:?}", i, &rectapp_data._rects[i]) ,10, 400 - _i*23, color, 24.0);
         if i == 0 {
             drawString(&mut GLOBAL_BACKBUFFER, "P1" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
         } else if i == 1{
@@ -1629,6 +1678,15 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         if rectapp_data.nth_player == i { continue; }
         drawRect(&mut GLOBAL_BACKBUFFER, rectapp_data.rects[i], [0.0, 1.0, 1.0, 0.7], false);
     }
+    //Save results
+    if textinfo.character == ' '{
+        let _name = rectapp_data.active_bmp_name.clone();
+        rectapp_data.store(&_name);
+        rectapp_data.write("TEST_TESTING");
+        //TIMER_ME drawRect(&mut GLOBAL_BACKBUFFER, [], []);// TOOD
+    }
+
+
     drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?}", rectapp_data.xy_or_wh) ,10, 170, [1.0, 1.0, 1.0, 1.0], 24.0);
     return 0;
 }}
