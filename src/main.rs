@@ -27,7 +27,6 @@ use tensorflow_sys_tools::tensorflow_tools::*;
 use tensorflow_sys_tools::tensorflow_bindings::tensorflow_init;
 
 
-static mut _v: *const std::ffi::c_void = null_mut();
 /*
 
 100 images per run
@@ -185,6 +184,7 @@ use stb_tt_sys::*;
             None =>{
             }
         }
+        //TODO speedup
         for i in 0..(w*h) as isize {
             *buffer.offset(i) = 0x00000000 + (r << 16) +  (g << 8)  + b;
         }
@@ -1191,12 +1191,17 @@ struct CameraTrigger{
 struct AiAppData{
     init: bool,
     glyph_model: TGBasicModel,
+    glyph_diagnostics_render: bool,
+    meters_diagnostics_render: bool,
+
 }
 impl  AiAppData{
     fn new()->AiAppData{
         AiAppData{
             init: false,
             glyph_model: TGBasicModel::new(),
+            glyph_diagnostics_render: false,
+            meters_diagnostics_render: false,
         }
     }
 }
@@ -1221,6 +1226,7 @@ struct RectangleAppData{
     xy_or_wh: bool,
     nth_file: usize,
     nth_player: usize, //TODO rename
+    are_we_writing: isize,
     bmp_box: [i32;4],
     temp_bmp_w_h: [i32;2],
     rects: [[i32;4]; 10],
@@ -1241,6 +1247,7 @@ impl RectangleAppData{
             xy_or_wh: true,
             nth_file: 0usize,
             nth_player: 0usize,
+            are_we_writing: -1isize,
             bmp_box: [250, 50, 650, 400],
             temp_bmp_w_h: [0,0],
             rects: [[0i32;4]; 10],
@@ -1357,7 +1364,7 @@ struct AppData{
     cameratrigger_is_updating: bool,
 
     temp_bmp: TGBitmap,
-    //SCREENSHOTE DATA//
+    //SCREENSHOT DATA//
 
     //AI DATA//
     ai_data: AiAppData,
@@ -1381,7 +1388,7 @@ impl AppData{
 
 
         AppData{
-            current_app: MenuEnum::rect,
+            current_app: MenuEnum::ai,
             global_menu_data: MenuData::new(),
 
             capture_exe_textbox: capture_exe_textbox,
@@ -1683,7 +1690,14 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         let _name = rectapp_data.active_bmp_name.clone();
         rectapp_data.store(&_name);
         rectapp_data.write("TEST_TESTING");
-        //TIMER_ME drawRect(&mut GLOBAL_BACKBUFFER, [], []);// TOOD
+        rectapp_data.are_we_writing = 300;
+    }
+    if rectapp_data.are_we_writing >= 0 {
+        rectapp_data.are_we_writing -=1;
+        let _alpha  = rectapp_data.are_we_writing as f32 / 300.0;
+
+        drawString(&mut GLOBAL_BACKBUFFER, "Writing file : TEST_TESTING.txt", 23, 0, [0.5, 0.8, 0.5, _alpha], 20.0);
+        drawRect(&mut GLOBAL_BACKBUFFER, [0, 5, 20, 20], [0.0, 1.0, 0.0, _alpha], true);
     }
 
 
@@ -1725,7 +1739,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
 
         fn get_glyph_bmp_data(glyph_window: &[usize], intensity_buffer: &mut Vec::<f32>,
                             sum_col_int: &mut Vec::<f32>, sum_row_int: &mut Vec::<f32>,
-                            screen: &[TGBitmap], debug_coord: &[i32]){unsafe{
+                            screen: &[TGBitmap], debug_coord: &[i32], draw_debug: bool){unsafe{
             for j in 0..glyph_window[3]{//Iterate over the height
                 for i in 0..glyph_window[2]{//Iterate over the width
                     let x = 4 * (i + glyph_window[0]);
@@ -1742,7 +1756,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                     sum_row_int[j] += intensity;
                     //NOTE
                     //this is for debugging purposes
-                    {//draw enhanced player one name
+                    if draw_debug{//draw enhanced player one name
                         let _x = debug_coord[0];
                         let _y = debug_coord[1] - 60;
                         drawRect(&mut GLOBAL_BACKBUFFER, [_x + 2*i as i32, _y + 2*j as i32, 2, 2], [r, g, b, 1.0], true);
@@ -1756,7 +1770,9 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         let mut p1_glyph_locations = Vec::<usize>::new();
         let mut p1_sum_row_int = vec![0.0f32; p1_text_window[3]];
         let mut p1_sum_col_int = vec![0.0f32; p1_text_window[2]];
-        get_glyph_bmp_data(&p1_text_window, &mut p1_intensity_buffer, &mut p1_sum_col_int, &mut p1_sum_row_int, &screen, &p1_coor_glyph_ai);
+        get_glyph_bmp_data(&p1_text_window, &mut p1_intensity_buffer,
+                           &mut p1_sum_col_int, &mut p1_sum_row_int,
+                           &screen, &p1_coor_glyph_ai, ai_data.glyph_diagnostics_render);
 
         struct LocGlyphSettings{
             min_abs: f32,
@@ -1796,14 +1812,16 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         let mut p2_glyph_locations = Vec::<usize>::new();
         let mut p2_sum_row_int = vec![0.0f32; p2_text_window[3]];
         let mut p2_sum_col_int = vec![0.0f32; p2_text_window[2]];
-        get_glyph_bmp_data(&p2_text_window, &mut p2_intensity_buffer, &mut p2_sum_col_int, &mut p2_sum_row_int, &screen, &p2_coor_glyph_ai);
+        get_glyph_bmp_data(&p2_text_window, &mut p2_intensity_buffer,
+                           &mut p2_sum_col_int, &mut p2_sum_row_int,
+                            &screen, &p2_coor_glyph_ai, ai_data.glyph_diagnostics_render);
 
         let mut p2_glyph_brackets = vec![];
         find_glyphs(&p2_sum_col_int, &mut p2_glyph_brackets, &settings);
 
         //NOTE
         //this is debug material
-        {//Draw glyph debug info
+        if ai_data.glyph_diagnostics_render {//Draw glyph debug info
             //TODO
             //Clean this shit up all these damn offsets and shit .... :(
             //Might not want these things hard coded... idk maybe we do.
@@ -1869,12 +1887,14 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                 }
                 //NOTE
                 //More debugging rendering
-                let _offsetx = p1_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
-                let _offsety = p1_coor_glyph_ai[1]-170;
-                for i in (0..28){
-                    for j in (0..28){
-                        let _r = arr[(27-i) + (27-j)*28];
-                        drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                if ai_data.glyph_diagnostics_render{
+                    let _offsetx = p1_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
+                    let _offsety = p1_coor_glyph_ai[1]-170;
+                    for i in (0..28){
+                        for j in (0..28){
+                            let _r = arr[(27-i) + (27-j)*28];
+                            drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                        }
                     }
                 }
             }
@@ -1889,7 +1909,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             }
 
             //let _offsetx = p1_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
-            let _offsety = p1_coor_glyph_ai[1]-190;
+            let _offsety = if ai_data.glyph_diagnostics_render {p1_coor_glyph_ai[1]-190} else {p1_coor_glyph_ai[1] - 20};
             if _max_arg >= 10{
                 let str_pred = format!("{} {:.2} ", std::char::from_u32( _max_arg as u32 + 55).unwrap(), _max);
                 drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
@@ -1925,12 +1945,14 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                 }
                 //NOTE
                 //More debugging rendering
-                let _offsetx = p2_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
-                let _offsety = p2_coor_glyph_ai[1]-170;
-                for i in (0..28){
-                    for j in (0..28){
-                        let _r = arr[(27-i) + (27-j)*28];
-                        drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                if ai_data.glyph_diagnostics_render{
+                    let _offsetx = p2_coor_glyph_ai[0]+30 + 35 * (glyph_i as i32 - 1);
+                    let _offsety = p2_coor_glyph_ai[1]-170;
+                    for i in (0..28){
+                        for j in (0..28){
+                            let _r = arr[(27-i) + (27-j)*28];
+                            drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1], [_r, _r, _r, 1.0], true);
+                        }
                     }
                 }
             }
@@ -1946,7 +1968,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             }
 
             //Draw results of the prediction
-            let _offsety = p2_coor_glyph_ai[1]-190;
+            let _offsety = if ai_data.glyph_diagnostics_render {p2_coor_glyph_ai[1]-190 } else { p1_coor_glyph_ai[1] - 40 };
             if _max_arg >= 10{
                 let str_pred = format!("{} {:.2} ", std::char::from_u32( _max_arg as u32 + 55).unwrap(), _max);
                 drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
@@ -1954,6 +1976,141 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             else {
                 let str_pred = format!("{} {:.2} ", _max_arg, _max);
                 drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+            //////////////////////
+            //Health and meters
+            //TODO
+            //glyph_diagnostics_render control flow only alters how things are drawn
+            //FIXME
+            if !ai_data.glyph_diagnostics_render{
+
+                let health_present_rgb = [0xff, 0xbb, 0x21];
+                let health_present_rgb_delta = [100, 100, 40];
+
+                let health_absent_rgb = [0, 0, 0];
+                let health_absent_rgb_delta = [15, 15, 15];
+
+                let health_change_rgb = [0x87, 0, 0];
+                let health_change_rgb_delta = [15, 15, 15];
+
+
+                //TODO
+                //COMPLETE ME
+                //let _v = (height - 80) * width + 150;
+                fn determine_health( bmp: &TGBitmap, x: usize, y: usize, w:usize, health_present_rgb: [i32; 3], health_present_rgb_delta: [i32; 3],
+                                                                         health_absent_rgb: [i32; 3], health_absent_rgb_delta: [i32; 3],
+                                                                         health_change_rgb: [i32; 3], health_change_rgb_delta: [i32; 3], debug: bool
+                )->(f32, f32, f32){
+                    let mut percent_health_present = 0.0f32;
+                    let mut percent_health_absent = 0.0f32;
+                    let mut percent_health_change = 0.0f32;
+
+                    let width  = bmp.info_header.width as usize;
+                    let height = bmp.info_header.height as usize;
+                    let _v = (height - y) * width + x;
+                    let mut _i = 0;
+                    for i in _v .. _v+w{
+                        let r  = bmp.rgba[4*i+2] as f32 / 255.0;
+                        let g  = bmp.rgba[4*i+1] as f32 / 255.0;
+                        let b  = bmp.rgba[4*i+0] as f32 / 255.0;
+                        let _r = bmp.rgba[4*i+2] as i32 ;
+                        let _g = bmp.rgba[4*i+1] as i32 ;
+                        let _b = bmp.rgba[4*i+0] as i32 ;
+
+                        {//health present
+                            let mut pass_health_present = true;
+                            if (_r - health_present_rgb[0]).abs() > health_present_rgb_delta[0]{
+                                pass_health_present = false;
+                            }
+                            if (_g - health_present_rgb[1]).abs() > health_present_rgb_delta[1]{
+                                pass_health_present = false;
+                            }
+                            if (_b - health_present_rgb[2]).abs() > health_present_rgb_delta[2]{
+                                pass_health_present = false;
+                            }
+                            if pass_health_present{
+                                percent_health_present += 1.0;
+                            } else{
+                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                            }
+                        }
+                        {//health absent
+                            let mut pass_health_absent = true;
+                            if (_r - health_absent_rgb[0]).abs() > health_absent_rgb_delta[0]{
+                                pass_health_absent = false;
+                            }
+                            if (_g - health_absent_rgb[1]).abs() > health_absent_rgb_delta[1]{
+                                pass_health_absent = false;
+                            }
+                            if (_b - health_absent_rgb[2]).abs() > health_absent_rgb_delta[2]{
+                                pass_health_absent = false;
+                            }
+                            if pass_health_absent{
+                                percent_health_absent += 1.0;
+                            } else{
+                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                            }
+                        }
+                        {//health delta
+                            let mut pass_health_change = true;
+                            if (_r - health_change_rgb[0]).abs() > health_change_rgb_delta[0]{
+                                pass_health_change = false;
+                            }
+                            if (_g - health_change_rgb[1]).abs() > health_change_rgb_delta[1]{
+                                pass_health_change = false;
+                            }
+                            if (_b - health_change_rgb[2]).abs() > health_change_rgb_delta[2]{
+                                pass_health_change = false;
+                            }
+                            if pass_health_change{
+                                percent_health_change += 1.0;
+                            } else{
+                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                            }
+                        }
+                        //FOR DEBUG
+                        if debug{
+                            unsafe{ drawRect(&mut GLOBAL_BACKBUFFER, [0+2*_i as i32 ,0, 2, 2], [r, g, b, 1.0], true); }
+                        }
+                        _i += 1;
+                    }
+
+                    percent_health_present /= w as f32;
+                    percent_health_absent  /= w as f32;
+                    percent_health_change  /= w as f32;
+                    //TODO
+                    //drawString ME
+                    return (percent_health_present, percent_health_absent, percent_health_change);
+                }
+                //player 1
+                let (p1_health_present, p1_health_absent, p1_health_change) = determine_health( &screen[0], 150, 80, 400, health_present_rgb, health_present_rgb_delta,
+                                                    health_absent_rgb, health_absent_rgb_delta,
+                                                    health_change_rgb, health_change_rgb_delta, false);
+                let (p2_health_present, p2_health_absent, p2_health_change) = determine_health( &screen[0], 730, 80, 400, health_present_rgb, health_present_rgb_delta,
+                                                                        health_absent_rgb, health_absent_rgb_delta,
+                                                                        health_change_rgb, health_change_rgb_delta, false);
+                //TODO draw to screen
+                //println!("{} {} {}", p2_health_present, p2_health_absent, p2_health_change);
+
+                //TODO
+                //make function specific to getting meter
+                //Getting meter info
+                let meter_present_rgb = [0xbb, 0xbb, 0xbb];
+                let meter_present_rgb_delta = [100, 100, 100];
+
+                let meter_absent_rgb = [0, 0, 0];
+                let meter_absent_rgb_delta = [15, 15, 15];
+
+                let meter_change_rgb = [0x87, 10, 10];
+                let meter_change_rgb_delta = [1, 1, 1];
+                let (p1_meter_present, p1_meter_absent, p1_meter_change) = determine_health( &screen[0], 80, 700, 230, meter_present_rgb, meter_present_rgb_delta,
+                                                             meter_absent_rgb,  meter_absent_rgb_delta,
+                                                             meter_change_rgb,  meter_change_rgb_delta, false);
+                let (p2_meter_present, p2_meter_absent, p2_meter_change) = determine_health( &screen[0], 970, 700, 230, meter_present_rgb, meter_present_rgb_delta,
+                                                             meter_absent_rgb,  meter_absent_rgb_delta,
+                                                             meter_change_rgb,  meter_change_rgb_delta, true);
+                //TODO draw to screen
+                //println!("{} {} {}", p2_meter_present, p2_meter_absent, p2_meter_change);
             }
         }
         drawBMP(&mut GLOBAL_BACKBUFFER, &screen[0], 330, 100, 1.0, Some(640), Some(360) );
@@ -1965,6 +2122,9 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     drawString(&mut GLOBAL_BACKBUFFER, "Toggle ai:", 20, 450, [1.0, 1.0, 1.0, 1.0], 24.0);
     drawString(&mut GLOBAL_BACKBUFFER, " [+] glyph classification", coor_glyph_ai[0], coor_glyph_ai[1], [1.0, 1.0, 1.0, 1.0], 20.0);
 
+
+
+    //BMP outline
     drawRect(&mut GLOBAL_BACKBUFFER, [330, 100, 640, 360], [0.8, 0.8, 0.8, 1.0], false);
 
 }
