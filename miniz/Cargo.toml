@@ -1,0 +1,10 @@
+[package]
+name = "miniz"
+version = "0.1.0"
+authors = ["TKGgunter <thothgunter@live.com>"]
+edition = "2018"
+build   = "miniz/build.rs"
+links = "miniz"
+
+[build-dependencies]
+cc = "1.0"

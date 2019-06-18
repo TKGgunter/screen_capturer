@@ -2,6 +2,7 @@
 extern crate winapi;
 extern crate stb_tt_sys;
 extern crate tensorflow_sys_tools;
+//extern crate miniz; for use at some future date
 
 
 
@@ -1512,6 +1513,10 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
     drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.2, 0.2, 0.2, 1.0], true);
     drawString(&mut GLOBAL_BACKBUFFER, "Something about a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
+    //TODO is this placed in the correct place
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: 'a' and 'd' to move through images", 50, 100, [1.0, 1.0, 1.0, 1.0], 20.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: mouse wheel to move through rectangles", 50, 80, [1.0, 1.0, 1.0, 1.0], 20.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: SPACEBAR to save results and right click to place vrts", 50, 60, [1.0, 1.0, 1.0, 1.0], 20.0);
     //TODO
     //usage instructions
 
@@ -1982,7 +1987,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             //TODO
             //glyph_diagnostics_render control flow only alters how things are drawn
             //FIXME
-            if !ai_data.glyph_diagnostics_render{
+            {
 
                 let health_present_rgb = [0xff, 0xbb, 0x21];
                 let health_present_rgb_delta = [100, 100, 40];
@@ -2089,9 +2094,12 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                 let (p2_health_present, p2_health_absent, p2_health_change) = determine_health( &screen[0], 730, 80, 400, health_present_rgb, health_present_rgb_delta,
                                                                         health_absent_rgb, health_absent_rgb_delta,
                                                                         health_change_rgb, health_change_rgb_delta, false);
-                //TODO draw to screen
-                //println!("{} {} {}", p2_health_present, p2_health_absent, p2_health_change);
 
+                //TODO render to some proper place
+                if !ai_data.glyph_diagnostics_render {
+                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_health_present, p1_health_absent, p1_health_change), 10, 70, [1.0, 1.0, 1.0, 1.0], 20.0);
+                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_health_present, p2_health_absent, p2_health_change), 10, 50, [1.0, 1.0, 1.0, 1.0], 20.0);
+                }
                 //TODO
                 //make function specific to getting meter
                 //Getting meter info
@@ -2109,8 +2117,11 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                 let (p2_meter_present, p2_meter_absent, p2_meter_change) = determine_health( &screen[0], 970, 700, 230, meter_present_rgb, meter_present_rgb_delta,
                                                              meter_absent_rgb,  meter_absent_rgb_delta,
                                                              meter_change_rgb,  meter_change_rgb_delta, true);
-                //TODO draw to screen
-                //println!("{} {} {}", p2_meter_present, p2_meter_absent, p2_meter_change);
+                //TODO render to some proper place
+                if !ai_data.glyph_diagnostics_render {
+                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_meter_present, p1_meter_absent, p1_meter_change), 10, 30, [1.0, 1.0, 1.0, 1.0], 20.0);
+                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_meter_present, p2_meter_absent, p2_meter_change), 10, 10, [1.0, 1.0, 1.0, 1.0], 20.0);
+                }
             }
         }
         drawBMP(&mut GLOBAL_BACKBUFFER, &screen[0], 330, 100, 1.0, Some(640), Some(360) );

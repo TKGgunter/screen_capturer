@@ -7,6 +7,8 @@ authors = ["TKGgunter <thothgunter@live.com>"]
 path = "stb_tt-sys/"
 [dependencies.tensorflow-sys-tools]
 path = "tensorflow-sys-tools/"
+[dependencies.miniz]
+path = "miniz/"
 
 [dependencies]
 ndarray = "*"
