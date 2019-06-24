@@ -42,7 +42,7 @@ impl TGBasicModel{
         {
             // Create the session.
             //TODO
-            //I should prob decouple the session and initialization of a model
+            //What is a session
             let opts = TF_NewSessionOptions();
             self.session = TF_NewSession(self.graph, opts, self.status);
             TF_DeleteSessionOptions(opts);

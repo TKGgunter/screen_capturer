@@ -1172,8 +1172,44 @@ impl TextBox{
     }}
 }
 
+//TODO
+//Move some where generally
+//I should put together a really simple single file lib
+//that hold all the holds all the funcs and structs that
+// I like but rust doesn't offer
+struct TGMap<T, V>{
+    keys: Vec<T>,
+    values: Vec<V>
+}
+impl<T: PartialEq, V> TGMap<T, V>{
+    pub fn new()->TGMap<T,V>{
+        TGMap{
+            keys: Vec::with_capacity(10),
+            values: Vec::with_capacity(10),
+        }
+    }
 
-
+    pub fn insert_or_set(&mut self, key: T, value: V){
+        for (i, it) in self.keys.iter().enumerate(){
+            if *it  == key{
+                self.values[i] = value;
+                return;
+            }
+        }
+        self.keys.push(key);
+        self.values.push(value);
+        return;
+    }
+    pub fn get_mut(&mut self, key: T)->&mut V{
+        for (i, it) in self.keys.iter().enumerate(){
+            if *it  == key{
+                return &mut self.values[i];
+            }
+        }
+        println!("Something is not map");
+        return &mut self.values[0];
+    }
+}
 
 
 #[derive(PartialEq, Debug)]
@@ -1192,8 +1228,11 @@ struct CameraTrigger{
 struct AiAppData{
     init: bool,
     glyph_model: TGBasicModel,
+    character_portrait_model: TGBasicModel,
+    character_portrait_map: TGMap<i32, String>,
     glyph_diagnostics_render: bool,
     meters_diagnostics_render: bool,
+    portrait_diagnostics_render: bool,
 
 }
 impl  AiAppData{
@@ -1201,8 +1240,11 @@ impl  AiAppData{
         AiAppData{
             init: false,
             glyph_model: TGBasicModel::new(),
+            character_portrait_model: TGBasicModel::new(),
+            character_portrait_map: TGMap::new(),
             glyph_diagnostics_render: false,
             meters_diagnostics_render: false,
+            portrait_diagnostics_render: true,
         }
     }
 }
@@ -1719,8 +1761,20 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     if ai_data.init == false{
         ai_data.init = true;
         ai_data.glyph_model.load_graph_from_file("assets/ai_models/glyph_NN.pb", None).expect("model load failed");
-        println!("{:?}", ai_data.glyph_model.get_input_dimensions());
-        println!("{:?}", ai_data.glyph_model.get_output_dimensions());
+        //println!("{:?}", ai_data.glyph_model.get_input_dimensions());
+        //println!("{:?}", ai_data.glyph_model.get_output_dimensions());
+        ai_data.character_portrait_model.load_graph_from_file("assets/ai_models/character_model.pb", None).expect("model load failed");
+        println!("{:?}", ai_data.character_portrait_model.get_input_dimensions());
+        println!("{:?}", ai_data.character_portrait_model.get_output_dimensions());
+        {//Setting up character portrait model result map
+            use std::io::BufReader;
+            let mut f = File::open("assets/ai_models/character_model_key.txt").expect("model key failed");
+            for _line in BufReader::new(f).lines(){
+                let line = _line.expect("could not read string");
+                let buffer : Vec<&str> = line.split(' ').collect();
+                ai_data.character_portrait_map.insert_or_set(buffer[1].parse::<i32>().unwrap(), buffer[0].to_string());
+            }
+        }
     }
     //NOTE
     //Just coloring the screen somthing special no biggy
@@ -1745,6 +1799,8 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         fn get_glyph_bmp_data(glyph_window: &[usize], intensity_buffer: &mut Vec::<f32>,
                             sum_col_int: &mut Vec::<f32>, sum_row_int: &mut Vec::<f32>,
                             screen: &[TGBitmap], debug_coord: &[i32], draw_debug: bool){unsafe{
+            //TODO
+            //Clap on screen height and width
             for j in 0..glyph_window[3]{//Iterate over the height
                 for i in 0..glyph_window[2]{//Iterate over the width
                     let x = 4 * (i + glyph_window[0]);
@@ -1982,147 +2038,270 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                 let str_pred = format!("{} {:.2} ", _max_arg, _max);
                 drawString(&mut GLOBAL_BACKBUFFER, &str_pred, 45*glyph_i as i32 - 35, _offsety, [1.0, 1.0, 1.0, 1.0], 20.0);
             }
-            //////////////////////
-            //Health and meters
+
+        }
+        //////////////////////
+        //Health and meters
+        //TODO
+        //glyph_diagnostics_render control flow only alters how things are drawn
+        //FIXME
+        {
+
+            let health_present_rgb = [0xff, 0xbb, 0x21];
+            let health_present_rgb_delta = [100, 100, 40];
+
+            let health_absent_rgb = [0, 0, 0];
+            let health_absent_rgb_delta = [15, 15, 15];
+
+            let health_change_rgb = [0x87, 0, 0];
+            let health_change_rgb_delta = [15, 15, 15];
+
+
             //TODO
-            //glyph_diagnostics_render control flow only alters how things are drawn
-            //FIXME
-            {
+            //COMPLETE ME
+            //let _v = (height - 80) * width + 150;
+            fn determine_health( bmp: &TGBitmap, x: usize, y: usize, w:usize, health_present_rgb: [i32; 3], health_present_rgb_delta: [i32; 3],
+                                                                     health_absent_rgb: [i32; 3], health_absent_rgb_delta: [i32; 3],
+                                                                     health_change_rgb: [i32; 3], health_change_rgb_delta: [i32; 3], debug: bool
+            )->(f32, f32, f32){
+                let mut percent_health_present = 0.0f32;
+                let mut percent_health_absent = 0.0f32;
+                let mut percent_health_change = 0.0f32;
 
-                let health_present_rgb = [0xff, 0xbb, 0x21];
-                let health_present_rgb_delta = [100, 100, 40];
+                let width  = bmp.info_header.width as usize;
+                let height = bmp.info_header.height as usize;
+                let _v = (height - y) * width + x;
+                let mut _i = 0;
+                for i in _v .. _v+w{
+                    let r  = bmp.rgba[4*i+2] as f32 / 255.0;
+                    let g  = bmp.rgba[4*i+1] as f32 / 255.0;
+                    let b  = bmp.rgba[4*i+0] as f32 / 255.0;
+                    let _r = bmp.rgba[4*i+2] as i32 ;
+                    let _g = bmp.rgba[4*i+1] as i32 ;
+                    let _b = bmp.rgba[4*i+0] as i32 ;
 
-                let health_absent_rgb = [0, 0, 0];
-                let health_absent_rgb_delta = [15, 15, 15];
+                    {//health present
+                        let mut pass_health_present = true;
+                        if (_r - health_present_rgb[0]).abs() > health_present_rgb_delta[0]{
+                            pass_health_present = false;
+                        }
+                        if (_g - health_present_rgb[1]).abs() > health_present_rgb_delta[1]{
+                            pass_health_present = false;
+                        }
+                        if (_b - health_present_rgb[2]).abs() > health_present_rgb_delta[2]{
+                            pass_health_present = false;
+                        }
+                        if pass_health_present{
+                            percent_health_present += 1.0;
+                        } else{
+                            //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                        }
+                    }
+                    {//health absent
+                        let mut pass_health_absent = true;
+                        if (_r - health_absent_rgb[0]).abs() > health_absent_rgb_delta[0]{
+                            pass_health_absent = false;
+                        }
+                        if (_g - health_absent_rgb[1]).abs() > health_absent_rgb_delta[1]{
+                            pass_health_absent = false;
+                        }
+                        if (_b - health_absent_rgb[2]).abs() > health_absent_rgb_delta[2]{
+                            pass_health_absent = false;
+                        }
+                        if pass_health_absent{
+                            percent_health_absent += 1.0;
+                        } else{
+                            //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                        }
+                    }
+                    {//health delta
+                        let mut pass_health_change = true;
+                        if (_r - health_change_rgb[0]).abs() > health_change_rgb_delta[0]{
+                            pass_health_change = false;
+                        }
+                        if (_g - health_change_rgb[1]).abs() > health_change_rgb_delta[1]{
+                            pass_health_change = false;
+                        }
+                        if (_b - health_change_rgb[2]).abs() > health_change_rgb_delta[2]{
+                            pass_health_change = false;
+                        }
+                        if pass_health_change{
+                            percent_health_change += 1.0;
+                        } else{
+                            //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
+                        }
+                    }
+                    //FOR DEBUG
+                    if debug{
+                        unsafe{ drawRect(&mut GLOBAL_BACKBUFFER, [0+2*_i as i32 ,0, 2, 2], [r, g, b, 1.0], true); }
+                    }
+                    _i += 1;
+                }
 
-                let health_change_rgb = [0x87, 0, 0];
-                let health_change_rgb_delta = [15, 15, 15];
-
-
+                percent_health_present /= w as f32;
+                percent_health_absent  /= w as f32;
+                percent_health_change  /= w as f32;
                 //TODO
-                //COMPLETE ME
-                //let _v = (height - 80) * width + 150;
-                fn determine_health( bmp: &TGBitmap, x: usize, y: usize, w:usize, health_present_rgb: [i32; 3], health_present_rgb_delta: [i32; 3],
-                                                                         health_absent_rgb: [i32; 3], health_absent_rgb_delta: [i32; 3],
-                                                                         health_change_rgb: [i32; 3], health_change_rgb_delta: [i32; 3], debug: bool
-                )->(f32, f32, f32){
-                    let mut percent_health_present = 0.0f32;
-                    let mut percent_health_absent = 0.0f32;
-                    let mut percent_health_change = 0.0f32;
+                //drawString ME
+                return (percent_health_present, percent_health_absent, percent_health_change);
+            }
+            //player 1
+            let (p1_health_present, p1_health_absent, p1_health_change) = determine_health( &screen[0], 150, 80, 400, health_present_rgb, health_present_rgb_delta,
+                                                health_absent_rgb, health_absent_rgb_delta,
+                                                health_change_rgb, health_change_rgb_delta, false);
+            let (p2_health_present, p2_health_absent, p2_health_change) = determine_health( &screen[0], 730, 80, 400, health_present_rgb, health_present_rgb_delta,
+                                                                    health_absent_rgb, health_absent_rgb_delta,
+                                                                    health_change_rgb, health_change_rgb_delta, false);
 
-                    let width  = bmp.info_header.width as usize;
-                    let height = bmp.info_header.height as usize;
-                    let _v = (height - y) * width + x;
-                    let mut _i = 0;
-                    for i in _v .. _v+w{
-                        let r  = bmp.rgba[4*i+2] as f32 / 255.0;
-                        let g  = bmp.rgba[4*i+1] as f32 / 255.0;
-                        let b  = bmp.rgba[4*i+0] as f32 / 255.0;
-                        let _r = bmp.rgba[4*i+2] as i32 ;
-                        let _g = bmp.rgba[4*i+1] as i32 ;
-                        let _b = bmp.rgba[4*i+0] as i32 ;
+            //TODO render to some proper place
+            if !ai_data.glyph_diagnostics_render {
+                drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_health_present, p1_health_absent, p1_health_change), 10, 70, [1.0, 1.0, 1.0, 1.0], 20.0);
+                drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_health_present, p2_health_absent, p2_health_change), 10, 50, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+            //TODO
+            //make function specific to getting meter
+            //Getting meter info
+            let meter_present_rgb = [0xbb, 0xbb, 0xbb];
+            let meter_present_rgb_delta = [100, 100, 100];
 
-                        {//health present
-                            let mut pass_health_present = true;
-                            if (_r - health_present_rgb[0]).abs() > health_present_rgb_delta[0]{
-                                pass_health_present = false;
-                            }
-                            if (_g - health_present_rgb[1]).abs() > health_present_rgb_delta[1]{
-                                pass_health_present = false;
-                            }
-                            if (_b - health_present_rgb[2]).abs() > health_present_rgb_delta[2]{
-                                pass_health_present = false;
-                            }
-                            if pass_health_present{
-                                percent_health_present += 1.0;
-                            } else{
-                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
-                            }
+            let meter_absent_rgb = [0, 0, 0];
+            let meter_absent_rgb_delta = [15, 15, 15];
+
+            let meter_change_rgb = [0x87, 10, 10];
+            let meter_change_rgb_delta = [1, 1, 1];
+            let (p1_meter_present, p1_meter_absent, p1_meter_change) = determine_health( &screen[0], 80, 700, 230, meter_present_rgb, meter_present_rgb_delta,
+                                                         meter_absent_rgb,  meter_absent_rgb_delta,
+                                                         meter_change_rgb,  meter_change_rgb_delta, false);
+            let (p2_meter_present, p2_meter_absent, p2_meter_change) = determine_health( &screen[0], 970, 700, 230, meter_present_rgb, meter_present_rgb_delta,
+                                                         meter_absent_rgb,  meter_absent_rgb_delta,
+                                                         meter_change_rgb,  meter_change_rgb_delta, true);
+            //TODO render to some proper place
+            if !ai_data.glyph_diagnostics_render {
+                drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_meter_present, p1_meter_absent, p1_meter_change), 10, 30, [1.0, 1.0, 1.0, 1.0], 20.0);
+                drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_meter_present, p2_meter_absent, p2_meter_change), 10, 10, [1.0, 1.0, 1.0, 1.0], 20.0);
+            }
+        }
+        {//character portrait identification
+            //NOTE These portraits are only applicable to GGxrd
+            let p1_portrait = [40, 25, 98, 98];
+            let p2_portrait = [40, 25, 98, 98];
+
+            //TODO
+            //Player 2
+
+            //Player 1 portrait
+            {//FLIP portrait
+                let mut arr_p1 = [0.0f32; 98*98*3];
+                {//Get stuff for player 1
+                    let mut cursor = 0;
+                    let x1 = p1_portrait[0];
+                    let x2 = x1 + p1_portrait[2];
+                    let y = p1_portrait[1];
+                    //I think this is a reflection about both x and y
+                    //It might be a good idea to explore all the effects of rev on 2d matrix indices
+                    for (i, it) in (0..p1_portrait[3]).enumerate(){
+                        for (j, jt) in (x1..x2).rev().enumerate(){//this might be a y? Not an x...
+                            //TODO
+                            //Clamp ME PLZ
+
+                            cursor = (i*p1_portrait[3] + j) * 3;
+                            let _cursor = 4*((screen[0].info_header.height as usize - it - y)*screen[0].info_header.width as usize + jt);
+                            arr_p1[cursor + 0] = screen[0].rgba[_cursor + 2] as f32 / 255.0; //R
+                            arr_p1[cursor + 1] = screen[0].rgba[_cursor + 1] as f32 / 255.0; //G
+                            arr_p1[cursor + 2] = screen[0].rgba[_cursor + 0] as f32 / 255.0; //B
                         }
-                        {//health absent
-                            let mut pass_health_absent = true;
-                            if (_r - health_absent_rgb[0]).abs() > health_absent_rgb_delta[0]{
-                                pass_health_absent = false;
-                            }
-                            if (_g - health_absent_rgb[1]).abs() > health_absent_rgb_delta[1]{
-                                pass_health_absent = false;
-                            }
-                            if (_b - health_absent_rgb[2]).abs() > health_absent_rgb_delta[2]{
-                                pass_health_absent = false;
-                            }
-                            if pass_health_absent{
-                                percent_health_absent += 1.0;
-                            } else{
-                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
-                            }
+                    }
+                }
+                let mut arr_p2 = [0.0f32; 98*98*3];
+                {//Get stuff for player 2
+                    let mut cursor = 0;
+                    let x1 = p2_portrait[0];
+                    let x2 = x1 + p2_portrait[2];
+                    let y = p2_portrait[1];
+                    //I think this is a reflection about both x and y
+                    //It might be a good idea to explore all the effects of rev on 2d matrix indices
+                    for (i, it) in (0..p2_portrait[3]).enumerate(){
+                        for (j, jt) in (x1..x2).rev().enumerate(){//this might be a y? Not an x...
+                            //TODO
+                            //Clamp ME PLZ
+
+                            cursor = (i*p2_portrait[3] + j) * 3;
+                            let _cursor = 4*((screen[0].info_header.height as usize - it - y)*screen[0].info_header.width as usize + jt);
+                            arr_p2[cursor + 0] = screen[0].rgba[_cursor + 2] as f32 / 255.0; //R
+                            arr_p2[cursor + 1] = screen[0].rgba[_cursor + 1] as f32 / 255.0; //G
+                            arr_p2[cursor + 2] = screen[0].rgba[_cursor + 0] as f32 / 255.0; //B
                         }
-                        {//health delta
-                            let mut pass_health_change = true;
-                            if (_r - health_change_rgb[0]).abs() > health_change_rgb_delta[0]{
-                                pass_health_change = false;
-                            }
-                            if (_g - health_change_rgb[1]).abs() > health_change_rgb_delta[1]{
-                                pass_health_change = false;
-                            }
-                            if (_b - health_change_rgb[2]).abs() > health_change_rgb_delta[2]{
-                                pass_health_change = false;
-                            }
-                            if pass_health_change{
-                                percent_health_change += 1.0;
-                            } else{
-                                //println!("{:?} {:?}", &[_r, _g, _b], &health_present_rgb);
-                            }
+                    }
+                }
+
+                let mut p1_max_arg = 0;
+                let mut p1_max = 0.0;
+                {//Predict player 1 portrait
+                    let mut p1_max_arg = 0;
+                    let mut p1_max = 0.0;
+                    let prediction = ai_data.character_portrait_model.predict(&mut arr_p1, 1).unwrap();
+                    for (i, it) in prediction.iter().enumerate(){
+                        if *it > p1_max{
+                            p1_max_arg = i;
+                            p1_max = *it;
                         }
-                        //FOR DEBUG
-                        if debug{
-                            unsafe{ drawRect(&mut GLOBAL_BACKBUFFER, [0+2*_i as i32 ,0, 2, 2], [r, g, b, 1.0], true); }
+                    }
+                }
+                let mut p2_max_arg = 0;
+                let mut p2_max = 0.0;
+                {//Predict player 1 portrait
+                    let mut p2_max_arg = 0;
+                    let mut p2_max = 0.0;
+                    let prediction = ai_data.character_portrait_model.predict(&mut arr_p2, 1).unwrap();
+                    for (i, it) in prediction.iter().enumerate(){
+                        if *it > p2_max{
+                            p2_max_arg = i;
+                            p2_max = *it;
                         }
-                        _i += 1;
+                    }
+                }
+                println!("Player 1 : {} {}", p1_max_arg, p1_max);
+                println!("{}",ai_data.character_portrait_map.get_mut(p1_max_arg as i32));
+                println!("Player 2 : {} {}", p2_max_arg, p2_max);
+                println!("{}",ai_data.character_portrait_map.get_mut(p2_max_arg as i32));
+
+                //NOTE
+                //More debugging rendering
+
+                if ai_data.portrait_diagnostics_render{
+                    //Player1
+                    let _offsetx = 30;
+                    let _offsety = 30;
+                    for i in (0..98){
+                        for j in (0..98){
+                            let cursor = ( (97-i) + (97-j)*98 ) * 3;
+                            let _r = arr_p1[cursor];
+                            let _g = arr_p1[cursor + 1];
+                            let _b = arr_p1[cursor + 2];
+                            drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx, j as i32 + _offsety, 1, 1],
+                                                             [_r, _g, _b, 1.0], true);
+                        }
                     }
 
-                    percent_health_present /= w as f32;
-                    percent_health_absent  /= w as f32;
-                    percent_health_change  /= w as f32;
-                    //TODO
-                    //drawString ME
-                    return (percent_health_present, percent_health_absent, percent_health_change);
-                }
-                //player 1
-                let (p1_health_present, p1_health_absent, p1_health_change) = determine_health( &screen[0], 150, 80, 400, health_present_rgb, health_present_rgb_delta,
-                                                    health_absent_rgb, health_absent_rgb_delta,
-                                                    health_change_rgb, health_change_rgb_delta, false);
-                let (p2_health_present, p2_health_absent, p2_health_change) = determine_health( &screen[0], 730, 80, 400, health_present_rgb, health_present_rgb_delta,
-                                                                        health_absent_rgb, health_absent_rgb_delta,
-                                                                        health_change_rgb, health_change_rgb_delta, false);
+                    for i in (0..98){
+                        for j in (0..98){
+                            let cursor = ( (97-i) + (97-j)*98 ) * 3;
+                            let _r = arr_p1[cursor];
+                            let _g = arr_p1[cursor + 1];
+                            let _b = arr_p1[cursor + 2];
+                            drawRect(&mut GLOBAL_BACKBUFFER, [i as i32 + _offsetx + 30, j as i32 + _offsety, 1, 1],
+                                                             [_r, _g, _b, 1.0], true);
+                        }
+                    }
 
-                //TODO render to some proper place
-                if !ai_data.glyph_diagnostics_render {
-                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_health_present, p1_health_absent, p1_health_change), 10, 70, [1.0, 1.0, 1.0, 1.0], 20.0);
-                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_health_present, p2_health_absent, p2_health_change), 10, 50, [1.0, 1.0, 1.0, 1.0], 20.0);
                 }
-                //TODO
-                //make function specific to getting meter
-                //Getting meter info
-                let meter_present_rgb = [0xbb, 0xbb, 0xbb];
-                let meter_present_rgb_delta = [100, 100, 100];
 
-                let meter_absent_rgb = [0, 0, 0];
-                let meter_absent_rgb_delta = [15, 15, 15];
 
-                let meter_change_rgb = [0x87, 10, 10];
-                let meter_change_rgb_delta = [1, 1, 1];
-                let (p1_meter_present, p1_meter_absent, p1_meter_change) = determine_health( &screen[0], 80, 700, 230, meter_present_rgb, meter_present_rgb_delta,
-                                                             meter_absent_rgb,  meter_absent_rgb_delta,
-                                                             meter_change_rgb,  meter_change_rgb_delta, false);
-                let (p2_meter_present, p2_meter_absent, p2_meter_change) = determine_health( &screen[0], 970, 700, 230, meter_present_rgb, meter_present_rgb_delta,
-                                                             meter_absent_rgb,  meter_absent_rgb_delta,
-                                                             meter_change_rgb,  meter_change_rgb_delta, true);
-                //TODO render to some proper place
-                if !ai_data.glyph_diagnostics_render {
-                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p1_meter_present, p1_meter_absent, p1_meter_change), 10, 30, [1.0, 1.0, 1.0, 1.0], 20.0);
-                    drawString(&mut GLOBAL_BACKBUFFER, &format!("{} {} {}", p2_meter_present, p2_meter_absent, p2_meter_change), 10, 10, [1.0, 1.0, 1.0, 1.0], 20.0);
-                }
             }
+
+
+
+
         }
         drawBMP(&mut GLOBAL_BACKBUFFER, &screen[0], 330, 100, 1.0, Some(640), Some(360) );
     }
@@ -2142,17 +2321,8 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     menu(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
     return 0;
 }
-fn rotate_90_vertflip( arr: &[f32], stride: usize)->Vec<f32>{
-    //TODO
-    //This crap needs to be included in the original definition creating the sample used for the glyph prediction.
-    let mut rt = vec![];
-    for i in (0..stride).rev(){
-        for j in 0..stride{
-            rt.push(arr[i + j*stride])
-        }
-    }
-    return rt;
-}
+
+
 fn app_screencapture(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
 
