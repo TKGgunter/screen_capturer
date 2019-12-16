@@ -1,0 +1,16 @@
+image hash,x0,y0,w0,h0,x1,y1,w1,h1,x2,y2,w2,h2,x3,y3,w3,h3,x4,y4,w4,h4,x5,y5,w5,h5,x6,y6,w6,h6,x7,y7,w7,h7,x8,y8,w8,h8,x9,y9,w9,h9
+training_testing_data/char_pos_melty\melty_blood_far_cr_h_1.bmp,195,72,185, 185, 933,64,125, 288, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_far_cr_l_1.bmp,165,68,271, 174, 947,64,125, 307, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_far_cr_n_5.bmp,203,70,183, 187, 917,62,127, 318, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_far_jp_f_1.bmp,297,256,215, 250, 875,64,139, 311, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_far_jp_n_1.bmp,209,394,133, 212, 951,55,117, 301, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_far_n_5.bmp,229,68,147, 318, 923,58,123, 314, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_h_1.bmp,346,72,279, 284, 845,64,127, 313, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_k_1.bmp,416,72,191, 273, 757,64,141, 313, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_k_10.bmp,456,70,157, 358, 745,64,143, 311, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_k_3.bmp,462,68,177, 288, 751,66,137, 324, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_neutral_1.bmp,384,70,145, 316, 757,64,131, 309, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_mid_p_1.bmp,408,66,205, 294, 757,62,133, 318, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_near_h_5.bmp,839,72,187, 280, 1000,79,125, 254, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_near_k_5.bmp,677,75,207, 318, 855,56,111, 318, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0
+training_testing_data/char_pos_melty\melty_blood_near_n_1.bmp,775,68,119, 318, 851,56,111, 332, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0, 0,0,0, 0

@@ -13,6 +13,8 @@ limitations under the License.
 
 
 unsafe extern "C" fn deallocator(data: *mut std_c_void) {
+    //NOTE 
+    //It seems very strange to be deallocating things myself.
     aligned_alloc::aligned_free(data as *mut ());
 }
 

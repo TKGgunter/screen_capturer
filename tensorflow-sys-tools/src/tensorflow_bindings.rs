@@ -422,7 +422,7 @@ unsafe extern "C" fn EMPTY_void__TF_Buffer() -> *mut TF_Buffer {_ERRO = -1; retu
 unsafe extern "C" fn EMPTY_TF_Buffer__(_arg1: *mut TF_Buffer) {_ERRO = -1; }
 unsafe extern "C" fn EMPTY_TF_Buffer__TF_Buffer(_arg1: *mut TF_Buffer) -> TF_Buffer {_ERRO = -1; return TF_Buffer{data: null(), length: 0, data_deallocator: None};}
 unsafe extern "C" fn EMPTY_NewTensor(_arg1: TF_DataType, _arg2: *const i64, _arg3: ::std::os::raw::c_int, _arg4: *mut ::std::os::raw::c_void, _arg5: usize,
-                                                        _arg6: ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void)>,
+                                                        _arg6: unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void),
                                                         _arg7: *mut ::std::os::raw::c_void) -> *mut TF_Tensor{ _ERRO = -1; return null_mut();}
 unsafe extern "C" fn EMPTY_TF_Tensor__cvoid(_arg1: *const TF_Tensor)-> *mut ::std::os::raw::c_void { _ERRO = -1; return null_mut();}
 unsafe extern "C" fn EMPTY_AllocateTensor(_arg1: TF_DataType, _arg2: *const i64, _arg3: ::std::os::raw::c_int, _arg4: usize)-> *mut TF_Tensor {_ERRO = -1; return null_mut();}
@@ -459,15 +459,24 @@ unsafe extern "C" fn EMPTY_TF_DeleteImportGaphDefOptions(_arg1:*mut TF_ImportGra
 unsafe extern "C" fn EMPTY_TF_Graph_charstar__TF_Operation(_graph: *mut TF_Graph, _oper_name: *const u8)-> *mut TF_Operation{_ERRO = -1; return null_mut();}
 unsafe extern "C" fn EMPTY_TF_GraphImportGraphDef(_graph: *mut TF_Graph, _graph_def: *const TF_Buffer, _options: *const TF_ImportGraphDefOptions, _status: *mut TF_Status){ _ERRO = -1;}
 unsafe extern "C" fn EMPTY_TF_TensorByteSize(arg1: *const TF_Tensor) -> usize{ _ERRO = -1; return 0;}
+unsafe extern "C" fn EMPTY_TF_TensorType(arg1: *const TF_Tensor) -> TF_DataType{_ERRO = -1; return TF_DataType::TF_FLOAT;}//TODO this should return something that breaks tensorflow
 unsafe extern "C" fn EMPTY_TF_ImportGraphDefOptionsNumReturnOutputs(opts: *const TF_ImportGraphDefOptions) -> i32{_ERRO = -1; return 0;}
 unsafe extern "C" fn EMPTY_TF_GraphNumFunctions (g: *const TF_Graph) -> i32{_ERRO = -1; return 0;}
 unsafe extern "C" fn EMPTY_TF_Operation__(oper: *mut TF_Operation) -> *const i8 {_ERRO = -1; return null();}
 unsafe extern "C" fn EMPTY_TF_GraphNextOperation(graph: *mut TF_Graph, pos: *mut usize)-> *mut TF_Operation{_ERRO = -1; return null_mut();}
 unsafe extern "C" fn EMPTY_TF_OperationNumOutputs(oper: *mut TF_Operation)-> i32 {_ERRO = -1; return 0;}
 unsafe extern "C" fn EMPTY_TF_GraphGetTensorNumDims(graph: *mut TF_Graph, output: TF_Output, status: *mut TF_Status)-> i32{_ERRO = -1; return 0;}
+unsafe extern "C" fn EMPTY_TF_OperationOutputType(oper_out: TF_Output) -> TF_DataType{ _ERRO = -1; return TF_DataType::TF_FLOAT}//TODO this should return something that breaks tensorflow
+
 unsafe extern "C" fn EMPTY_TF_GraphGetTensorShape(graph: *mut TF_Graph, output: TF_Output, dims: *mut i64, num_dims: i32, status: *mut TF_Status){_ERRO = -1;}
-
-
+unsafe extern "C" fn EMPTY_TF_NewOperation(graph: *mut TF_Graph, op_type: *const ::std::os::raw::c_char, oper_name: *const ::std::os::raw::c_char)-> *mut TF_OperationDescription{ _ERRO = -1; return null_mut();}
+unsafe extern "C" fn EMPTY_TF_FinishOperation(desc: *mut TF_OperationDescription, status: *mut TF_Status) -> *mut TF_Operation{_ERRO = -1; return null_mut();}
+unsafe extern "C" fn EMPTY_TF_AddInputList(desc: *mut TF_OperationDescription, inputs: *const TF_Output, num_inputs: ::std::os::raw::c_int){ _ERRO = -1; }
+unsafe extern "C" fn EMPTY_TF_AddInput(desc: *mut TF_OperationDescription, input: TF_Output){ _ERRO = -1; }
+unsafe extern "C" fn EMPTY_TF_SetAttrType(desc: *mut TF_OperationDescription, attr_name: *const i8, value: TF_DataType){ _ERRO = -1; }
+unsafe extern "C" fn EMPTY_TF_SetAttrTensor(desc: *mut TF_OperationDescription, attr_name: *const i8, value: *mut TF_Tensor, status: *mut TF_Status){ _ERRO = -1; }
+unsafe extern "C" fn EMPTY_TF_SetAttrShape(desc: *mut TF_OperationDescription, attr_name: *const ::std::os::raw::c_char, dims: *const i64, num_dims: i32){ _ERRO = -1; }
+unsafe extern "C" fn EMPTY_TF_SetAttrBool(  desc: *mut TF_OperationDescription,  attr_name: *const ::std::os::raw::c_char,  value: ::std::os::raw::c_uchar){ _ERRO = -1; }
 
 
 
@@ -483,15 +492,15 @@ pub static mut TF_NewBuffer    : unsafe extern "C" fn() -> *mut TF_Buffer = EMPT
 pub static mut TF_DeleteBuffer : unsafe extern "C" fn(*mut TF_Buffer) = EMPTY_TF_Buffer__;
 pub static mut TF_GetBuffer    : unsafe extern "C" fn(*mut TF_Buffer) -> TF_Buffer = EMPTY_TF_Buffer__TF_Buffer;
 pub static mut TF_NewTensor    : unsafe extern "C" fn(TF_DataType,  *const i64, ::std::os::raw::c_int, *mut ::std::os::raw::c_void, usize,
-                                                        ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void)>,
+                                                        unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void),
                                                         *mut ::std::os::raw::c_void) -> *mut TF_Tensor = EMPTY_NewTensor;
-pub static mut TF_TensorData   : unsafe extern "C" fn(*const TF_Tensor)-> *mut ::std::os::raw::c_void = EMPTY_TF_Tensor__cvoid;
+pub static mut TF_TensorData    : unsafe extern "C" fn(*const TF_Tensor)-> *mut ::std::os::raw::c_void = EMPTY_TF_Tensor__cvoid;
 pub static mut TF_AllocateTensor: unsafe extern "C" fn(TF_DataType, *const i64, ::std::os::raw::c_int, usize)-> *mut TF_Tensor = EMPTY_AllocateTensor;
-pub static mut TF_DeleteTensor : unsafe extern "C" fn(*mut TF_Tensor) = EMPTY_TF_Tensor__;
+pub static mut TF_DeleteTensor  : unsafe extern "C" fn(*mut TF_Tensor) = EMPTY_TF_Tensor__;
 pub static mut TF_TensorByteSize: unsafe extern "C" fn(arg1: *const TF_Tensor) -> usize = EMPTY_TF_TensorByteSize;
+pub static mut TF_TensorType    : unsafe extern "C" fn(arg1: *const TF_Tensor) -> TF_DataType = EMPTY_TF_TensorType;
 /*
     pub fn TF_TensorMaybeMove(tensor: *mut TF_Tensor) -> *mut TF_Tensor;
-    pub fn TF_TensorType(arg1: *const TF_Tensor) -> TF_DataType;
     pub fn TF_NumDims(arg1: *const TF_Tensor) -> ::std::os::raw::c_int;
     pub fn TF_Dim(tensor: *const TF_Tensor, dim_index: ::std::os::raw::c_int)
      -> i64;
@@ -794,16 +803,156 @@ pub static mut TF_OperationNumOutputs: unsafe extern "C" fn (oper: *mut TF_Opera
 pub static mut TF_OperationNumInputs: unsafe extern "C" fn(oper: *mut TF_Operation)->i32 = EMPTY_TF_OperationNumOutputs;
 pub static mut TF_OperationDevice: unsafe extern "C" fn(oper: *mut TF_Operation)->*const i8 = EMPTY_TF_Operation__;
 pub static mut TF_GraphGetTensorNumDims: unsafe extern "C" fn(graph: *mut TF_Graph, output: TF_Output, status: *mut TF_Status)-> i32 = EMPTY_TF_GraphGetTensorNumDims;
+pub static mut TF_OperationOutputType: unsafe extern "C" fn(oper_out: TF_Output) -> TF_DataType = EMPTY_TF_OperationOutputType;
 
-    /*
-    pub fn TF_OperationOutputType(oper_out: TF_Output) -> TF_DataType;
-    */
 pub static mut TF_GraphGetTensorShape: unsafe extern "C" fn(graph: *mut TF_Graph, output: TF_Output, dims: *mut i64, num_dims: i32, status: *mut TF_Status) = EMPTY_TF_GraphGetTensorShape;
+pub static mut TF_SetAttrShape : unsafe extern "C" fn(desc: *mut TF_OperationDescription, attr_name: *const i8, dims: *const i64, num_dims: i32) = EMPTY_TF_SetAttrShape;
+pub static mut TF_SetAttrBool  : unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: u8) = EMPTY_TF_SetAttrBool;
 
-pub fn tensorflow_init()->Result<(), String>{unsafe{
+
+/*
+extern "C" {
+    pub fn TF_GraphSetTensorShape(graph: *mut TF_Graph, output: TF_Output,
+                                  dims: *const i64,
+                                  num_dims: ::std::os::raw::c_int,
+                                  status: *mut TF_Status);
+    pub fn TF_SetDevice(desc: *mut TF_OperationDescription,
+                        device: *const ::std::os::raw::c_char);
+    pub fn TF_AddControlInput(desc: *mut TF_OperationDescription,
+                              input: *mut TF_Operation);
+    pub fn TF_ColocateWith(desc: *mut TF_OperationDescription,
+                           op: *mut TF_Operation);
+    pub fn TF_SetAttrString(desc: *mut TF_OperationDescription,
+                            attr_name: *const ::std::os::raw::c_char,
+                            value: *const ::std::os::raw::c_void,
+                            length: usize);
+    pub fn TF_SetAttrStringList(desc: *mut TF_OperationDescription,
+                                attr_name: *const ::std::os::raw::c_char,
+                                values: *const *const ::std::os::raw::c_void,
+                                lengths: *const usize,
+                                num_values: ::std::os::raw::c_int);
+    pub fn TF_SetAttrInt(desc: *mut TF_OperationDescription,
+                         attr_name: *const ::std::os::raw::c_char,
+                         value: i64);
+    pub fn TF_SetAttrIntList(desc: *mut TF_OperationDescription,
+                             attr_name: *const ::std::os::raw::c_char,
+                             values: *const i64,
+                             num_values: ::std::os::raw::c_int);
+    pub fn TF_SetAttrFloat(desc: *mut TF_OperationDescription,
+                           attr_name: *const ::std::os::raw::c_char,
+                           value: f32);
+    pub fn TF_SetAttrFloatList(desc: *mut TF_OperationDescription,
+                               attr_name: *const ::std::os::raw::c_char,
+                               values: *const f32,
+                               num_values: ::std::os::raw::c_int);
+    pub fn TF_SetAttrBoolList(desc: *mut TF_OperationDescription,
+                              attr_name: *const ::std::os::raw::c_char,
+                              values: *const ::std::os::raw::c_uchar,
+                              num_values: ::std::os::raw::c_int);
+    pub fn TF_SetAttrTypeList(desc: *mut TF_OperationDescription,
+                              attr_name: *const ::std::os::raw::c_char,
+                              values: *const TF_DataType,
+                              num_values: ::std::os::raw::c_int);
+    pub fn TF_SetAttrFuncName(desc: *mut TF_OperationDescription,
+                              attr_name: *const ::std::os::raw::c_char,
+                              value: *const ::std::os::raw::c_char,
+                              length: usize);
+    pub fn TF_SetAttrShapeList(desc: *mut TF_OperationDescription,
+                               attr_name: *const ::std::os::raw::c_char,
+                               dims: *const *const i64,
+                               num_dims: *const ::std::os::raw::c_int,
+                               num_shapes: ::std::os::raw::c_int);
+    pub fn TF_SetAttrTensorShapeProto(desc: *mut TF_OperationDescription,
+                                      attr_name:
+                                          *const ::std::os::raw::c_char,
+                                      proto: *const ::std::os::raw::c_void,
+                                      proto_len: usize,
+                                      status: *mut TF_Status);
+    pub fn TF_SetAttrTensorShapeProtoList(desc: *mut TF_OperationDescription,
+                                          attr_name:
+                                              *const ::std::os::raw::c_char,
+                                          protos:
+                                              *const *const ::std::os::raw::c_void,
+                                          proto_lens: *const usize,
+                                          num_shapes: ::std::os::raw::c_int,
+                                          status: *mut TF_Status);
+    pub fn TF_SetAttrTensorList(desc: *mut TF_OperationDescription,
+                                attr_name: *const ::std::os::raw::c_char,
+                                values: *const *const TF_Tensor,
+                                num_values: ::std::os::raw::c_int,
+                                status: *mut TF_Status);
+    pub fn TF_SetAttrValueProto(desc: *mut TF_OperationDescription,
+                                attr_name: *const ::std::os::raw::c_char,
+                                proto: *const ::std::os::raw::c_void,
+                                proto_len: usize, status: *mut TF_Status);
+    pub fn TF_OperationOutputListLength(oper: *mut TF_Operation,
+                                        arg_name:
+                                            *const ::std::os::raw::c_char,
+                                        status: *mut TF_Status)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationInputType(oper_in: TF_Input) -> TF_DataType;
+    pub fn TF_OperationInputListLength(oper: *mut TF_Operation,
+                                       arg_name:
+                                           *const ::std::os::raw::c_char,
+                                       status: *mut TF_Status)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationInput(oper_in: TF_Input) -> TF_Output;
+    pub fn TF_OperationOutputNumConsumers(oper_out: TF_Output)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationOutputConsumers(oper_out: TF_Output,
+                                       consumers: *mut TF_Input,
+                                       max_consumers: ::std::os::raw::c_int)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationNumControlInputs(oper: *mut TF_Operation)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationGetControlInputs(oper: *mut TF_Operation,
+                                        control_inputs:
+                                            *mut *mut TF_Operation,
+                                        max_control_inputs:
+                                            ::std::os::raw::c_int)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationNumControlOutputs(oper: *mut TF_Operation)
+     -> ::std::os::raw::c_int;
+    pub fn TF_OperationGetControlOutputs(oper: *mut TF_Operation,
+                                         control_outputs:
+                                             *mut *mut TF_Operation,
+                                         max_control_outputs:
+                                             ::std::os::raw::c_int)
+     -> ::std::os::raw::c_int;
+}
+*/
+pub static mut TF_NewOperation: unsafe extern "C" fn (graph: *mut TF_Graph, 
+                                                      op_type: *const ::std::os::raw::c_char, 
+                                                      oper_name: *const ::std::os::raw::c_char) -> *mut TF_OperationDescription = EMPTY_TF_NewOperation;
+
+pub static mut TF_FinishOperation : unsafe extern "C" fn (desc: *mut TF_OperationDescription,
+                                                          status: *mut TF_Status) -> *mut TF_Operation = EMPTY_TF_FinishOperation;
+
+pub static mut TF_AddInputList: unsafe extern "C" fn (desc: *mut TF_OperationDescription, inputs: *const TF_Output, num_inputs: ::std::os::raw::c_int) = EMPTY_TF_AddInputList;
+
+pub static mut TF_AddInput: unsafe extern "C" fn (desc: *mut TF_OperationDescription, input: TF_Output) = EMPTY_TF_AddInput;
+pub static mut TF_SetAttrType: unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: TF_DataType) = EMPTY_TF_SetAttrType;
+pub static mut TF_SetAttrTensor: unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: *mut TF_Tensor, status: *mut TF_Status) = EMPTY_TF_SetAttrTensor;
+
+// The data in the buffer will be the serialized OpList proto for ops registered
+// in this address space.
+pub static mut TF_GetAllOpList: unsafe extern "C" fn()->*mut TF_Buffer = EMPTY_void__TF_Buffer;
+
+
+
+
+pub fn tensorflow_init( path: Option<&str>)->Result<(), String>{unsafe{
     //TODO
     //There has to be a better way to get file to lib or something... should not be hard coded.
-    let lib = LoadLibraryA("..\\..\\tensorflow-sys-tools\\tensorflow_assets\\tensorflow.dll\0".as_ptr() as *const i8);
+    println!("tensorflow rs binding file: {}", file!());
+    println!("current directroy {:?}", std::env::current_dir());
+    let lib;
+    match path {
+        Some(p)=> {
+                      println!("loading from path: {}", p); 
+                      lib = LoadLibraryA( p.as_ptr() as *const i8); },
+        None   => { lib = LoadLibraryA("tensorflow_assets\\tensorflow.dll\0".as_ptr() as *const i8); }
+    }
     if null() == lib{
         let s = format!("Could not open lib \n{:?}", GetLastError());
         return Err(s);
@@ -819,7 +968,10 @@ pub fn tensorflow_init()->Result<(), String>{unsafe{
                             "TF_GraphOperationByName\0", "TF_GraphImportGraphDef\0", "TF_TensorByteSize\0", "TF_ImportGraphDefOptionsNumReturnOutputs\0",
                             "TF_GraphNumFunctions\0", "TF_ImportGraphDefOptionsNumReturnOperations\0", "TF_OperationName\0",
                             "TF_GraphNextOperation\0", "TF_OperationOpType\0", "TF_OperationNumOutputs\0", "TF_OperationNumInputs\0",
-                            "TF_OperationDevice\0", "TF_GraphGetTensorNumDims\0", "TF_GraphGetTensorShape\0" ];
+                            "TF_OperationDevice\0", "TF_GraphGetTensorNumDims\0", "TF_GraphGetTensorShape\0",
+                            "TF_GetAllOpList\0", "TF_NewOperation\0", "TF_FinishOperation\0", "TF_AddInputList\0", "TF_AddInput\0",
+                            "TF_SetAttrType\0", "TF_SetAttrTensor\0", "TF_TensorType\0", "TF_SetAttrShape\0", "TF_SetAttrBool\0",
+                            "TF_OperationOutputType\0"];
     for it in function_names.iter(){
         let function = GetProcAddress(lib, it.as_ptr() as *const i8) as *const usize;
         if null() == function{
@@ -850,7 +1002,7 @@ pub fn tensorflow_init()->Result<(), String>{unsafe{
             TF_GetBuffer = std::mem::transmute::<*const usize,  unsafe extern "C" fn(*mut TF_Buffer)->TF_Buffer >(function);
         } else if *it == "TF_NewTensor\0"{
             TF_NewTensor = std::mem::transmute::<*const usize,  unsafe extern "C" fn(TF_DataType,  *const i64, ::std::os::raw::c_int, *mut ::std::os::raw::c_void, usize,
-                                                        ::std::option::Option<unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void)>,
+                                                        unsafe extern "C" fn(data: *mut ::std::os::raw::c_void, usize, *mut ::std::os::raw::c_void),
                                                         *mut ::std::os::raw::c_void) -> *mut TF_Tensor >(function);
         } else if *it == "TF_TensorData\0"{
             TF_TensorData = std::mem::transmute::<*const usize,unsafe extern "C" fn(*const TF_Tensor)-> *mut ::std::os::raw::c_void>(function);
@@ -922,142 +1074,33 @@ pub fn tensorflow_init()->Result<(), String>{unsafe{
             TF_GraphGetTensorNumDims = std::mem::transmute::<*const usize, unsafe extern "C" fn(graph: *mut TF_Graph, output: TF_Output, status: *mut TF_Status)-> i32>(function);
         } else if *it == "TF_GraphGetTensorShape\0"{
             TF_GraphGetTensorShape = std::mem::transmute::<*const usize, unsafe extern "C" fn(graph: *mut TF_Graph, output: TF_Output, dims: *mut i64, num_dims: i32, status: *mut TF_Status)>(function);
-        } else{
-            println!("Failed to load {}", it);
+        } else if *it == "TF_GetAllOpList\0"{
+            TF_GetAllOpList = std::mem::transmute::<*const usize, unsafe extern "C" fn()->*mut TF_Buffer>(function);
+        } else if *it == "TF_NewOperation\0"{
+            TF_NewOperation = std::mem::transmute::<*const usize, unsafe extern "C" fn (graph: *mut TF_Graph, 
+                                                                                        op_type: *const ::std::os::raw::c_char, 
+                                                                                        oper_name: *const ::std::os::raw::c_char) -> *mut TF_OperationDescription>(function);
+        } else if *it == "TF_FinishOperation\0"{
+            TF_FinishOperation = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, status: *mut TF_Status) -> *mut TF_OperationDescription>(function);
+        } else if *it == "TF_AddInputList\0"{
+            TF_AddInputList = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, inputs: *const TF_Output, num_inputs: ::std::os::raw::c_int)>(function);
+        } else if *it == "TF_AddInput\0"{
+            TF_AddInput = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, input: TF_Output)>(function);
+        } else if *it == "TF_SetAttrType\0"{
+            TF_SetAttrType = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: TF_DataType)>(function);
+        } else if *it == "TF_SetAttrTensor\0"{
+            TF_SetAttrTensor = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: *mut TF_Tensor, status: *mut TF_Status)>(function);
+        } else if *it == "TF_TensorType\0"{
+            TF_TensorType = std::mem::transmute::<*const usize, unsafe extern "C" fn (arg1: *const TF_Tensor)->TF_DataType>(function);
+        } else if *it == "TF_SetAttrShape\0"{
+            TF_SetAttrShape = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, dems: *const i64, num_dims: i32)>(function);
+        } else if *it == "TF_SetAttrBool\0"{
+            TF_SetAttrBool = std::mem::transmute::<*const usize, unsafe extern "C" fn (desc: *mut TF_OperationDescription, attr_name: *const i8, value: u8)>(function);
+        } else if *it == "TF_OperationOutputType\0"{
+            TF_OperationOutputType = std::mem::transmute::<*const usize, unsafe extern "C" fn (oper_out: TF_Output)->TF_DataType>(function);
+        } else {                                                                      
+            println!("Failed to load {}", it);                                        
         }
     }
     return Ok(());
 }}
-/*
-extern "C" {
-    pub fn TF_GraphSetTensorShape(graph: *mut TF_Graph, output: TF_Output,
-                                  dims: *const i64,
-                                  num_dims: ::std::os::raw::c_int,
-                                  status: *mut TF_Status);
-    pub fn TF_NewOperation(graph: *mut TF_Graph,
-                           op_type: *const ::std::os::raw::c_char,
-                           oper_name: *const ::std::os::raw::c_char)
-     -> *mut TF_OperationDescription;
-    pub fn TF_SetDevice(desc: *mut TF_OperationDescription,
-                        device: *const ::std::os::raw::c_char);
-    pub fn TF_AddInput(desc: *mut TF_OperationDescription, input: TF_Output);
-    pub fn TF_AddInputList(desc: *mut TF_OperationDescription,
-                           inputs: *const TF_Output,
-                           num_inputs: ::std::os::raw::c_int);
-    pub fn TF_AddControlInput(desc: *mut TF_OperationDescription,
-                              input: *mut TF_Operation);
-    pub fn TF_ColocateWith(desc: *mut TF_OperationDescription,
-                           op: *mut TF_Operation);
-    pub fn TF_SetAttrString(desc: *mut TF_OperationDescription,
-                            attr_name: *const ::std::os::raw::c_char,
-                            value: *const ::std::os::raw::c_void,
-                            length: usize);
-    pub fn TF_SetAttrStringList(desc: *mut TF_OperationDescription,
-                                attr_name: *const ::std::os::raw::c_char,
-                                values: *const *const ::std::os::raw::c_void,
-                                lengths: *const usize,
-                                num_values: ::std::os::raw::c_int);
-    pub fn TF_SetAttrInt(desc: *mut TF_OperationDescription,
-                         attr_name: *const ::std::os::raw::c_char,
-                         value: i64);
-    pub fn TF_SetAttrIntList(desc: *mut TF_OperationDescription,
-                             attr_name: *const ::std::os::raw::c_char,
-                             values: *const i64,
-                             num_values: ::std::os::raw::c_int);
-    pub fn TF_SetAttrFloat(desc: *mut TF_OperationDescription,
-                           attr_name: *const ::std::os::raw::c_char,
-                           value: f32);
-    pub fn TF_SetAttrFloatList(desc: *mut TF_OperationDescription,
-                               attr_name: *const ::std::os::raw::c_char,
-                               values: *const f32,
-                               num_values: ::std::os::raw::c_int);
-    pub fn TF_SetAttrBool(desc: *mut TF_OperationDescription,
-                          attr_name: *const ::std::os::raw::c_char,
-                          value: ::std::os::raw::c_uchar);
-    pub fn TF_SetAttrBoolList(desc: *mut TF_OperationDescription,
-                              attr_name: *const ::std::os::raw::c_char,
-                              values: *const ::std::os::raw::c_uchar,
-                              num_values: ::std::os::raw::c_int);
-    pub fn TF_SetAttrType(desc: *mut TF_OperationDescription,
-                          attr_name: *const ::std::os::raw::c_char,
-                          value: TF_DataType);
-    pub fn TF_SetAttrTypeList(desc: *mut TF_OperationDescription,
-                              attr_name: *const ::std::os::raw::c_char,
-                              values: *const TF_DataType,
-                              num_values: ::std::os::raw::c_int);
-    pub fn TF_SetAttrFuncName(desc: *mut TF_OperationDescription,
-                              attr_name: *const ::std::os::raw::c_char,
-                              value: *const ::std::os::raw::c_char,
-                              length: usize);
-    pub fn TF_SetAttrShape(desc: *mut TF_OperationDescription,
-                           attr_name: *const ::std::os::raw::c_char,
-                           dims: *const i64, num_dims: ::std::os::raw::c_int);
-    pub fn TF_SetAttrShapeList(desc: *mut TF_OperationDescription,
-                               attr_name: *const ::std::os::raw::c_char,
-                               dims: *const *const i64,
-                               num_dims: *const ::std::os::raw::c_int,
-                               num_shapes: ::std::os::raw::c_int);
-    pub fn TF_SetAttrTensorShapeProto(desc: *mut TF_OperationDescription,
-                                      attr_name:
-                                          *const ::std::os::raw::c_char,
-                                      proto: *const ::std::os::raw::c_void,
-                                      proto_len: usize,
-                                      status: *mut TF_Status);
-    pub fn TF_SetAttrTensorShapeProtoList(desc: *mut TF_OperationDescription,
-                                          attr_name:
-                                              *const ::std::os::raw::c_char,
-                                          protos:
-                                              *const *const ::std::os::raw::c_void,
-                                          proto_lens: *const usize,
-                                          num_shapes: ::std::os::raw::c_int,
-                                          status: *mut TF_Status);
-    pub fn TF_SetAttrTensor(desc: *mut TF_OperationDescription,
-                            attr_name: *const ::std::os::raw::c_char,
-                            value: *mut TF_Tensor, status: *mut TF_Status);
-    pub fn TF_SetAttrTensorList(desc: *mut TF_OperationDescription,
-                                attr_name: *const ::std::os::raw::c_char,
-                                values: *const *const TF_Tensor,
-                                num_values: ::std::os::raw::c_int,
-                                status: *mut TF_Status);
-    pub fn TF_SetAttrValueProto(desc: *mut TF_OperationDescription,
-                                attr_name: *const ::std::os::raw::c_char,
-                                proto: *const ::std::os::raw::c_void,
-                                proto_len: usize, status: *mut TF_Status);
-    pub fn TF_FinishOperation(desc: *mut TF_OperationDescription,
-                              status: *mut TF_Status) -> *mut TF_Operation;
-    pub fn TF_OperationOutputListLength(oper: *mut TF_Operation,
-                                        arg_name:
-                                            *const ::std::os::raw::c_char,
-                                        status: *mut TF_Status)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationInputType(oper_in: TF_Input) -> TF_DataType;
-    pub fn TF_OperationInputListLength(oper: *mut TF_Operation,
-                                       arg_name:
-                                           *const ::std::os::raw::c_char,
-                                       status: *mut TF_Status)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationInput(oper_in: TF_Input) -> TF_Output;
-    pub fn TF_OperationOutputNumConsumers(oper_out: TF_Output)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationOutputConsumers(oper_out: TF_Output,
-                                       consumers: *mut TF_Input,
-                                       max_consumers: ::std::os::raw::c_int)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationNumControlInputs(oper: *mut TF_Operation)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationGetControlInputs(oper: *mut TF_Operation,
-                                        control_inputs:
-                                            *mut *mut TF_Operation,
-                                        max_control_inputs:
-                                            ::std::os::raw::c_int)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationNumControlOutputs(oper: *mut TF_Operation)
-     -> ::std::os::raw::c_int;
-    pub fn TF_OperationGetControlOutputs(oper: *mut TF_Operation,
-                                         control_outputs:
-                                             *mut *mut TF_Operation,
-                                         max_control_outputs:
-                                             ::std::os::raw::c_int)
-     -> ::std::os::raw::c_int;
-}
-*/

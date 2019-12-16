@@ -1,3 +1,155 @@
+july 3, 2019 code review
+project stats
+  + cargo toml
+  EXTERNAL CRATES
+    + ndarray ?wtf is this here for?
+    + winapi
+  INTERNAL CRATES
+    + stb_tt      --  truetype font support
+    + tensorflow  -- bindings to tensorflow dll
+    + miniz       -- zlib compression stuffs
+
+CURRENT TODO LIST as of (July 4th ):
+
+//TODO
+// + I want to be able to change fonts
+// + fdraw functions where position data is floating point
+// + copy chunks of pixel buffers where you can instead of iterating
+
+//TODO: screen_capture related
+// + test and use app
+// + debug selecting gamepad vs keyboard
+//    + hard to get out of gamepad key selection mode if you never select any thing
+// + make keyboard and gamepad button down events good I get too many signals for one button down
+// + work through TODOs
+// FUTURE TODO
+// +  make bmp scaling better
+// + change view port width and height to match the aspect ratio of the game window
+// + clean up how we select where to place text cursor...works but is currently janky -- feb 22, 2019
+// + cheat engine like tool <= I don't think i need this we can just call windows to get
+//    relevent info
+//https://github.com/fenix01/cheatengine-library
+
+
+GENERAL
++ get rid of warnings... its time
++ KNOWN BUG index out of range during exist
++ KNOWN BUG index out of range in app_ai when char 1 jumps near life bar
+
+////////////////////////////////////////
+BUG REPORT
+    app_screenshot
++ clinking on and off keyboard and gamepad does not reset
++ too many dels leads to a space
+
+
+    app_ai
++ crash do to bounds check when character super jumps near name glyphs
+////////////////////////////////////////
+
+
+CODE REVIEW
+    mod windowslayer
++ windowslayer is half baked COMPLETE ME
+
+    mod renderingtools
++ in draw commands set alpha
++ line 224 in renderDefaultToBuffer
+  change loop to memcopy
++ FUTURE NOTE bmp struct should prob be fixed sized arrays. dynamic sized bitmaps are a very special case
++ line 248-249 in resizeBMP can be combined lines 250-251
++ line 264 defining a function inside a loop does that have any effects
+  I assume not but should tested.  also does inlining this function have an effect
++ line 263 and 264 need not be forward declared
++ line 265 is responsible for the center line artifact we see when resizing should check this out
++ line 290 in function drawBMP speedup don't draw bmps with less than 0.05 of alpha prob can't see it any way
+  should test least value possible
++ line 328 in function drawBMP could prob make the alpha cut be a bit less
++ line 365 in function drawChar return early when alpha is near zero
++ line 436 in function drawChar set alpha when rendering
++ line 453 in function drawString handle new line characters
++ line 453 in function drawString if alpha is very low return early
++ line 462 in function drawRect if alpha is very low return early
++ line 482 and 507 and 511 in function drawRect set alpha
++ line 710 in function getAdvance should be a part of render tools
++ line 748 what happens to the old memory when we do virtual alloc, are we leaking !!!!!TEST!!!!!
+
++ line 994 in function main GLOBAL_FONTINFO should carry underlying data to repove the possibility of
+  access whiled freed
+
++ mouse, text and keyboard should all be part of an interactivity module
+
++ line 1121 in could in function update with in TextBox impl   this if statement could prob be an else
+
+
+    impl TGMap
++ hash maybe 
++ line 1217 addition to "fn new" in addition include with_capacity
++ line 1235 include IndexMut and Index Traits for sugaring
+
+
+
++ line 1404 - 1436 in struct AppData should be in a screenshot struct
+
++ globally define some frequent colors [grey, red, green, blue, white, black]
+
+
+
+    fn menu
++ line 1550 colors and positioning need refinement
+
+    struct RectangleAppData
++ line 1300 what does 'active' mean
++ line 1303 what is 'nth-player' 
++ line 1307 and 1309 what's the  difference between rect and _rect
+
+    struct RectResultStorage
++  line 1286 and 1287 what's the difference between rects and app_rects 
+
+    fn app_rectangle
++ line 1595 what are the instructions, render them
++ line 1636 include png(that we've saved) at some point ... not very important
++ line 1685 verify that we save proper coordinates 
++ line 1688 "if index > 9" 9 is hard coded when it should not be
++ menu needs to be added
+
+
+    fn app_ai
++ GENERAL user level change debug info rendering
++ line 1793 key file need for glyph_NN.pb
++ line 1814 using info from screen_capture_app state. We really don't want to do
+  this because it will muddies what should be a very clean speration of state. 
+  If we want to share info some higher order var should be set.
++ lines 1839 - 1842 replace info_header.width with "let  info_header_width"
++ line 1837 clap on x, y, and x + y*info_header_width to be within screen bmp
++ line 1857 and 1858 var named "p1_coor_glyph_ai" and "p1_text_window" is confusing 
++ line 1858 "p1_text_window" should not be hardcoded
++ line 1873 in fn find_glyphs some additional documentation is needed
++ line 1891 settings shoud be loaded for file as they are specific to the game of interest
++ ??? line 1891 LocGlyphSettings struct be made accessable to all ???
++ line 1918 offsets idk
++ line 1981 offsets idk
++ line 1982 offsets idk
++ line 1972 propagate negative signs
++ line 2022 make prediction code a function
++ line 2014 why is arr a vec? why not pre alloc arr and clear it for every glyph
+  It compiles without the vec so maybe it's ok
++ line 2077-2084 all these things should be defined at a higher scope and eventually taken from a file
++ FUTURE fn determine_health  could be different from game to game so map of function pointers might
+  do the trick
++ lines 2103 would moving these out make things faster...maybe not because comps always occur and 
+  its only 6 32 byte values
++ lines 2213 and 2214 portrait rect needs to be defined at a higher scope
++ lines 2213 and 2214 portrait rect needs to be loaded for some external file
++ lines 2230 cursor neededs to be clamped
++ line 2249 bitmap colors are assumed to be 24 byte should check before applying a stride
+
+    fn app_screencapture
++
+
+
+
+////////////////////////////////////////////////////////////////////////////
 march 9, 2019 code review
 
 + Description of code at a high level.

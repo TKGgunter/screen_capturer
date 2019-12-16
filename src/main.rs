@@ -28,8 +28,12 @@ use tensorflow_sys_tools::tensorflow_tools::*;
 use tensorflow_sys_tools::tensorflow_bindings::tensorflow_init;
 
 
-/*
 
+const C4_YELLOW :[f32;4]= [1.0, 1.0, 0.0, 1.0];
+const C4_WHITE  :[f32;4]= [1.0, 1.0, 1.0, 1.0];
+const C4_BLACK :[f32;4] = [0.0, 0.0, 0.0, 1.0];
+
+/*
 100 images per run
     + 3.034
     + 2.46
@@ -49,6 +53,10 @@ So we can see 50 frames per second without writing the frames out
 // + I want to be able to change fonts
 // + fdraw functions where position data is floating point
 // + copy chunks of pixel buffers where you can instead of iterating
+
+//TODO: ai related
+// prgram crashes when player jumps is a particular x range
+
 
 //TODO: screen_capture related
 // + test and use app
@@ -93,6 +101,8 @@ extern crate stb_tt_sys;
 use std::ptr::{null, null_mut};
 use winapi::um::wingdi::{BITMAP, BITMAPINFO, BITMAPINFOHEADER, SRCCOPY, RGBQUAD};
 use stb_tt_sys::*;
+use std::io::prelude::*;
+use std::fs::File;
 
     pub static mut GLOBAL_FONTINFO : stbtt_fontinfo = new_stbtt_fontinfo();
 
@@ -118,8 +128,6 @@ use stb_tt_sys::*;
         pub colors_important:   u32,
     }
 
-    //struct palette
-    //array of pixels
 
     #[repr(packed)]
     #[derive(Clone)]
@@ -138,6 +146,40 @@ use stb_tt_sys::*;
        pub info_header:        TGBitmapHeaderInfo,
        pub rgba:               Vec<u8>,
     }
+
+    pub fn loadBMP(filename: &str)->TGBitmap{unsafe{
+        let mut rt = TGBitmap::new(0,0);
+        let mut f = File::open(filename).expect("BMP file could not be opened.");
+        let mut img_buffer = Vec::new();
+        f.read_to_end(&mut img_buffer).expect("Buffer could not be read.");
+
+        let it =  img_buffer.as_ptr() as *const u8;
+        rt.file_header.type_ =  *it.offset(0) as u16;// == 0x42;
+        rt.file_header.type_ = (*it.offset(1) as u16) << 2;// == 0x4d;
+        rt.file_header.size_ = *(it.offset(2) as *const u32);
+        rt.file_header.reserved_1 = *(it.offset(6) as *const u16);
+        rt.file_header.reserved_2 = *(it.offset(8) as *const u16);
+        rt.file_header.off_bits =  *(it.offset(10) as *const u32);
+
+
+        rt.info_header.header_size = *(it.offset(14) as *const u32);
+        rt.info_header.width       = *(it.offset(18) as *const i32);
+        rt.info_header.height      =  *(it.offset(22) as *const i32);
+        rt.info_header.planes      =  *(it.offset(26) as *const u16);
+        rt.info_header.bit_per_pixel = *(it.offset(28) as *const u16);
+        rt.info_header.compression = *(it.offset(30) as *const u32);
+        rt.info_header.image_size  = *(it.offset(34) as *const u32);
+        rt.info_header.x_px_per_meter = *(it.offset(38) as *const i32);
+        rt.info_header.y_px_per_meter = *(it.offset(42) as *const i32);
+        rt.info_header.colors_used  = *(it.offset(46) as *const u32);
+        rt.info_header.colors_important = *(it.offset(50) as *const u32);
+
+
+        let buffer = img_buffer[rt.file_header.off_bits as usize ..].to_vec();
+        rt.rgba = buffer;
+
+        return rt;
+    }}
 
     impl TGBitmap{
         pub fn new(w: i32, h: i32)->TGBitmap{
@@ -273,9 +315,11 @@ use stb_tt_sys::*;
         }
 
         let bmp = if w == source_bmp.info_header.width &&
-                          h == source_bmp.info_header.height
-                        { (*source_bmp).clone() }
-                        else { resizeBMP(source_bmp, w, h)};
+                     h == source_bmp.info_header.height{
+                         (*source_bmp).clone()
+                     } else {
+                         resizeBMP(source_bmp, w, h)
+                     };
 
         {   //render bmp_buffer to main_buffer
 
@@ -467,7 +511,7 @@ use stb_tt_sys::*;
 
                     if filled == false{
                          if (_i - x) > 1 && (_i - x ) < w-2 &&
-                          (_j - y) > 1 && (_j - y ) < h-2{continue;}
+                            (_j - y) > 1 && (_j - y ) < h-2{continue;}
 
                          *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
 
@@ -477,8 +521,6 @@ use stb_tt_sys::*;
                 }
             }
             else {
-                //TODO
-                //Test me does this optimization really help
                 std::ptr::copy::<u32>(fast_rgba_buffer.as_ptr(), buffer.offset(c_w*j + x), w as usize);
             }
         }
@@ -563,6 +605,10 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
             break;
         }
         _capture_count = _capture_count + 1;
+        if _capture_count > 1 {
+            std::thread::sleep(time::Duration::from_millis(10));
+        }
+
         let oldBitmap = SelectObject(compat_dc, bitmap_handle as winapi::shared::windef::HGDIOBJ);
         if BitBlt(compat_dc as HDC, 0, 0, w, h, handle_dc.window_dc as HDC, 0, 0, SRCCOPY) == 0 {
             println!("BitBlt broke {:?}", line!());
@@ -622,10 +668,10 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
         rt.push(TGBitmap{file_header: header, info_header: info, rgba: pixels});
 
     }
-    if save_files{for it in rt.iter(){
+    if save_files{for (i, it) in rt.iter().enumerate(){
 
-        let filename = format!("{}/{}_{:}.bmp",directory_prepend, file_prepend, _capture_count);
-        //println!("writing {}", filename);
+        let filename = format!("{}/{}_{:}.bmp",directory_prepend, file_prepend, i+1);
+        println!("writing {}", filename);
         let mut filebuffer = match File::create(filename){
             Ok(_fb) => _fb,
             Err(_s) => {
@@ -962,16 +1008,17 @@ fn main() {
         }
     }
     unsafe { xinput::XInputEnable(1); }
-    tensorflow_init().expect("Tensorflow lib init problem.");
+    //TODO Update and remove explicit path
+    tensorflow_init(Some("C:\\Users\\thoth\\Documents\\Rust\\screen_capturer\\tensorflow-sys-tools\\tensorflow_assets\\tensorflow.dll\0")).expect("Tensorflow lib init problem.");
 
 
     make_window( );
 }
 
 //TODO
-fn setprivilege(){
-
-}
+//fn setprivilege(){
+//
+//}
 
 #[derive(PartialEq, Clone)]
 enum ButtonStatus{
@@ -1110,8 +1157,6 @@ impl TextBox{
         }
 
         for i in 0..keyboardinfo.key.len(){
-            //TODO
-            // maybe we should use match instead of if else statements
             if keyboardinfo.status[i] == ButtonStatus::Down{
                 if keyboardinfo.key[i] == KeyboardEnum::Leftarrow{
                     if self.text_cursor > 0 {
@@ -1330,15 +1375,15 @@ impl RectangleAppData{
     }
     fn write(&self, filename: &str){
         let mut contents = String::new();
-        contents += "image hash, ";
+        contents += "image hash";
         for i in 0..self.rects.len(){
-            contents += &format!{"x{0}, y{0}, w{0}, h{0}", i};
+            contents += &format!{",x{0}, y{0}, w{0}, h{0}", i};
         }
         contents += "\n";
         for it in self.storage.iter(){
             contents += &it.image_name;
             for jt in it.rects.iter(){
-                contents += &format!{"{},{},{}, {}, ", jt[0], jt[1], jt[2], jt[3]};
+                contents += &format!{",{},{},{},{}", jt[0], jt[1], jt[2], jt[3]};
             }
             contents += "\n";
         }
@@ -1351,6 +1396,7 @@ enum MenuEnum{
     screenshot,
     ai,
     rect,
+    sound,
 }
 
 struct MenuData{
@@ -1419,6 +1465,7 @@ impl AppData{
     pub fn new()->AppData{
         let mut capture_exe_textbox = TextBox::new();
         capture_exe_textbox.text_buffer = "Guilty Gear Xrd -REVELATOR-".to_string();
+        capture_exe_textbox.text_buffer = "MELTY BLOOD Actress Again Current Code".to_string();
 
         let mut root_folder_textbox = TextBox::new();
         root_folder_textbox.text_buffer = "temp".to_string();
@@ -1431,7 +1478,7 @@ impl AppData{
 
 
         AppData{
-            current_app: MenuEnum::ai,
+            current_app: MenuEnum::sound,
             global_menu_data: MenuData::new(),
 
             capture_exe_textbox: capture_exe_textbox,
@@ -1483,6 +1530,7 @@ fn menu(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration){unsafe{
     let x = GLOBAL_BACKBUFFER.w-25;
     let y = GLOBAL_BACKBUFFER.h-25;
+    //The following 5 draw rect calls draws a shitty menu icon
     drawRect(&mut GLOBAL_BACKBUFFER, [x, y, 20, 20],
                                     [0.7, 0.7, 0.7, 1.0], true);
     drawRect(&mut GLOBAL_BACKBUFFER, [x+2, y+15, 5, 5],
@@ -1548,17 +1596,167 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         MenuEnum::rect => {
             return app_rectangle(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
         },
+        MenuEnum::sound => {
+            return app_sound(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+        }
     }
     return 0;
 }
+
+fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
+
+    let REFTIMES_PER_SEC  = 10000000;
+    let REFTIMES_PER_MILLISEC  = 10000;
+
+    drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.05, 0.2, 0.05, 1.0], true);
+    drawString(&mut GLOBAL_BACKBUFFER, "Something sounds like a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
+
+
+
+    //The following code is roughly based off of example code found in 
+    //https://docs.microsoft.com/en-us/windows/win32/coreaudio/capturing-a-stream
+    use winapi::um::combaseapi::{CoCreateInstance, CLSCTX_ALL};
+    use winapi::um::mmdeviceapi::{CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole, IMMDevice};
+    use winapi::um::audioclient::{IID_IAudioClient, IAudioClient, IID_IAudioCaptureClient, IAudioCaptureClient, AUDCLNT_BUFFERFLAGS_SILENT};
+    use winapi::um::audiosessiontypes::{AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_SHAREMODE_SHARED};
+    use winapi::shared::guiddef::GUID;
+    use winapi::shared::mmreg::WAVEFORMATEX;
+    use winapi::Interface;
+
+
+
+    let mut pEnumerator = null_mut();
+    let hr = CoCreateInstance(&CLSID_MMDeviceEnumerator as *const _, null_mut(), CLSCTX_ALL, &IMMDeviceEnumerator::uuidof() as *const _,  &mut pEnumerator as *mut _);
+    println!("Result of CoCreateInstance {}", hr);
+
+
+    macro_rules! deref{
+        ($x:tt, $y:tt)=>{
+            (*($x as *mut $y))
+        }
+    }
+
+    let mut pDevice = null_mut();
+    let hr = deref!(pEnumerator, IMMDeviceEnumerator).GetDefaultAudioEndpoint(eRender, eConsole, &mut pDevice as *mut _);
+    println!("Result of GetDefaultAudioEndpoint {}", hr);
+
+   
+    let mut pAudioClient = null_mut();
+    let hr = deref!(pDevice, IMMDevice).Activate(&IID_IAudioClient as *const _, CLSCTX_ALL, null_mut(), &mut pAudioClient as *mut _);
+    println!("Result of Active {}", hr);
+
+
+
+    let mut pwfx = null_mut();
+    let hr = deref!(pAudioClient, IAudioClient).GetMixFormat(&mut pwfx as *mut _);
+    println!("Result of GetMixFormat {}", hr);
+   
+
+    let mut hnsRequestedDuration = REFTIMES_PER_SEC;
+    let hr = deref!(pAudioClient, IAudioClient).Initialize(
+                         AUDCLNT_SHAREMODE_SHARED,
+                         AUDCLNT_STREAMFLAGS_LOOPBACK,
+                         hnsRequestedDuration,
+                         0,
+                         pwfx as *mut _,
+                         null_mut()); 
+    println!("Result of Initiaize {}", hr);
+
+
+    let mut buffersize = 0u32;
+    let hr = deref!(pAudioClient, IAudioClient).GetBufferSize(&mut buffersize as *mut _);
+    println!("Result of GetBufferSize {}; BufferSize {}", hr, buffersize);
+
+
+
+    let mut pCaptureClient = null_mut();
+    let hr = deref!(pAudioClient, IAudioClient).GetService(
+                     &IID_IAudioCaptureClient as *const _,
+                     &mut pCaptureClient as *mut _);
+    println!("Result of GetService {}", hr);
+
+
+    println!("waveformat");
+    println!("formattag: {:?}", deref!(pwfx, WAVEFORMATEX).wFormatTag);
+    println!("nChannels: {:?}", deref!(pwfx, WAVEFORMATEX).nChannels);
+    println!("nSamplesPerSec: {:?}", deref!(pwfx, WAVEFORMATEX).nSamplesPerSec);
+    println!("BitsPerSample: {:?}", deref!(pwfx, WAVEFORMATEX).wBitsPerSample);
+    println!("nBlockAlign: {:?}", deref!(pwfx, WAVEFORMATEX).nBlockAlign);
+    println!("cbSize: {:?}", deref!(pwfx, WAVEFORMATEX).cbSize);
+
+
+    let hnsActualDuration = REFTIMES_PER_SEC as u64 *
+                     buffersize as u64 / deref!(pwfx, WAVEFORMATEX).nSamplesPerSec as u64;
+    println!("Actual Duration: {}", hnsActualDuration);
+
+
+
+    let hr = deref!(pAudioClient, IAudioClient).Start();
+    println!("start recording audio {}", hr);
+    {
+        std::thread::sleep(time::Duration::from_millis(hnsActualDuration/REFTIMES_PER_MILLISEC/2));
+
+
+        let mut packetLength = 0u32;
+        let hr = deref!(pCaptureClient, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
+        println!("GetNextPacket size run: {}\n Next Packet size {}", hr, packetLength); 
+
+        while packetLength != 0
+        {
+            let mut pData = null_mut();
+            let mut numFramesAvailable = 0u32;
+            let mut flags = 0u32;
+            // Get the available data in the shared buffer.
+            let hr = deref!(pCaptureClient, IAudioCaptureClient).GetBuffer(
+                                   &mut pData as *mut _,
+                                   &mut numFramesAvailable as *mut _,
+                                   &mut flags as *mut _, null_mut(), null_mut());
+            println!("Get Buffer {}", hr);
+            println!("numFramesAvailable: {}", numFramesAvailable);
+            println!("flags: {}", flags);
+
+            //Prob wrong
+            if (flags & AUDCLNT_BUFFERFLAGS_SILENT == 1)
+            {
+                pData = null_mut();  // Tell CopyData to write silence.
+            }
+
+            //NOTE
+            //Currently I'm under the impression that audio should be interacted in 32 bit chuncks where 
+            //the first 2 bytes are good data and the last two are junk(this might just be a function of channels)
+            //The first 2 bytes are the left and right channels (I don't know which is which)
+            let slice = std::slice::from_raw_parts_mut(pData, (numFramesAvailable) as usize);
+            println!("{:?}", slice);
+
+            let hr = deref!(pCaptureClient, IAudioCaptureClient).ReleaseBuffer(numFramesAvailable);
+            println!("ReleaseBuffer {}", hr);
+
+
+            let hr = deref!(pCaptureClient, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
+            println!("Get NextPacketSize {}", hr);
+    panic!("EXIT");
+        }
+    }
+    let hr = deref!(pAudioClient, IAudioClient).Stop();
+    println!("stop recording audio {}", hr);
+
+
+    panic!("EXIT");
+    return 0;
+}}
+
+
+
 fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
     drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.2, 0.2, 0.2, 1.0], true);
     drawString(&mut GLOBAL_BACKBUFFER, "Something about a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
-    //TODO is this placed in the correct place
-    drawString(&mut GLOBAL_BACKBUFFER, "Directions: 'a' and 'd' to move through images", 50, 100, [1.0, 1.0, 1.0, 1.0], 20.0);
-    drawString(&mut GLOBAL_BACKBUFFER, "Directions: mouse wheel to move through rectangles", 50, 80, [1.0, 1.0, 1.0, 1.0], 20.0);
-    drawString(&mut GLOBAL_BACKBUFFER, "Directions: SPACEBAR to save results and right click to place vrts", 50, 60, [1.0, 1.0, 1.0, 1.0], 20.0);
+
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: 'a' and 'd' to cycle images", 5, 100,    C4_YELLOW, 20.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: mouse wheel to cycle rectangles", 5, 80, C4_YELLOW, 20.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: SPACEBAR to save results ", 5, 60,       C4_YELLOW, 20.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Directions: 'right click' to place vrts", 5, 40,     C4_YELLOW, 20.0);
     //TODO
     //usage instructions
 
@@ -1646,11 +1844,8 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         drawBMP(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp, rectapp_data.bmp_box[0],
              rectapp_data.bmp_box[1], 1.0, None, None);
         drawRect(&mut GLOBAL_BACKBUFFER, rectapp_data.bmp_box, [1.0;4], false);
-        drawString(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp_name, 700, 30, [0.0, 1.0, 0.0, 0.75], 20.0);
+        drawString(&mut GLOBAL_BACKBUFFER, &rectapp_data.active_bmp_name, 400, 30, [0.0, 1.0, 0.0, 0.75], 20.0);
     }
-    //TODO
-    //+ store results
-    //+ save results with coverted coordinates
     {//Update active "player" rect
         let mut index = rectapp_data.nth_player as i32 - mouseinfo.wheel_delta ;
         if index > 9 {
@@ -1662,7 +1857,7 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     }
 
     let mut nth_player = rectapp_data.nth_player;
-    if in_rect(mouseinfo.x, mouseinfo.y, rectapp_data.bmp_box){//Draw rect and something else
+    if in_rect(mouseinfo.x, mouseinfo.y, rectapp_data.bmp_box){//User draws rect
         if mouseinfo.old_lbutton == ButtonStatus::Down && mouseinfo.lbutton == ButtonStatus::Up{
             if rectapp_data.xy_or_wh {
                 rectapp_data.active = true;
@@ -1722,9 +1917,9 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         }
         drawString(&mut GLOBAL_BACKBUFFER, &format!("{:?} {:?}", i, &rectapp_data._rects[i]) ,10, 400 - _i*23, color, 24.0);
         if i == 0 {
-            drawString(&mut GLOBAL_BACKBUFFER, "P1" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
+            drawString(&mut GLOBAL_BACKBUFFER, "Lp" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
         } else if i == 1{
-            drawString(&mut GLOBAL_BACKBUFFER, "P2" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
+            drawString(&mut GLOBAL_BACKBUFFER, "RP" ,200, 400 - _i*23, [1.0, 0.0, 0.0, 1.0], 24.0);
         }
     }
     //Draw all stable rects
@@ -1815,9 +2010,8 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                     intensity_buffer.push(intensity.powf(2.0));
                     sum_col_int[i] += intensity;
                     sum_row_int[j] += intensity;
-                    //NOTE
-                    //this is for debugging purposes
-                    if draw_debug{//draw enhanced player one name
+
+                    if draw_debug{//draw enhanced player name
                         let _x = debug_coord[0];
                         let _y = debug_coord[1] - 60;
                         drawRect(&mut GLOBAL_BACKBUFFER, [_x + 2*i as i32, _y + 2*j as i32, 2, 2], [r, g, b, 1.0], true);
@@ -2042,9 +2236,7 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         }
         //////////////////////
         //Health and meters
-        //TODO
-        //glyph_diagnostics_render control flow only alters how things are drawn
-        //FIXME
+        //
         {
 
             let health_present_rgb = [0xff, 0xbb, 0x21];
@@ -2186,8 +2378,6 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             let p1_portrait = [40, 25, 98, 98];
             let p2_portrait = [40, 25, 98, 98];
 
-            //TODO
-            //Player 2
 
             //Player 1 portrait
             {//FLIP portrait
@@ -2311,8 +2501,6 @@ fn app_ai(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
     let coor_glyph_ai = [20, 400];
     drawString(&mut GLOBAL_BACKBUFFER, "Toggle ai:", 20, 450, [1.0, 1.0, 1.0, 1.0], 24.0);
     drawString(&mut GLOBAL_BACKBUFFER, " [+] glyph classification", coor_glyph_ai[0], coor_glyph_ai[1], [1.0, 1.0, 1.0, 1.0], 20.0);
-
-
 
     //BMP outline
     drawRect(&mut GLOBAL_BACKBUFFER, [330, 100, 640, 360], [0.8, 0.8, 0.8, 1.0], false);
@@ -2739,39 +2927,6 @@ fn foundWindow(name: &str)->bool{unsafe{
     return rt;
 }}
 
-fn loadBMP(filename: &str)->TGBitmap{unsafe{
-    let mut rt = TGBitmap::new(0,0);
-    let mut f = File::open(filename).expect("BMP file could not be opened.");
-    let mut img_buffer = Vec::new();
-    f.read_to_end(&mut img_buffer).expect("Buffer could not be read.");
-
-    let it =  img_buffer.as_ptr() as *const u8;
-    rt.file_header.type_ =  *it.offset(0) as u16;// == 0x42;
-    rt.file_header.type_ = (*it.offset(1) as u16) << 2;// == 0x4d;
-    rt.file_header.size_ = *(it.offset(2) as *const u32);
-    rt.file_header.reserved_1 = *(it.offset(6) as *const u16);
-    rt.file_header.reserved_2 = *(it.offset(8) as *const u16);
-    rt.file_header.off_bits =  *(it.offset(10) as *const u32);
-
-
-    rt.info_header.header_size = *(it.offset(14) as *const u32);
-    rt.info_header.width       = *(it.offset(18) as *const i32);
-    rt.info_header.height      =  *(it.offset(22) as *const i32);
-    rt.info_header.planes      =  *(it.offset(26) as *const u16);
-    rt.info_header.bit_per_pixel = *(it.offset(28) as *const u16);
-    rt.info_header.compression = *(it.offset(30) as *const u32);
-    rt.info_header.image_size  = *(it.offset(34) as *const u32);
-    rt.info_header.x_px_per_meter = *(it.offset(38) as *const i32);
-    rt.info_header.y_px_per_meter = *(it.offset(42) as *const i32);
-    rt.info_header.colors_used  = *(it.offset(46) as *const u32);
-    rt.info_header.colors_important = *(it.offset(50) as *const u32);
-
-
-    let buffer = img_buffer[rt.file_header.off_bits as usize ..].to_vec();
-    rt.rgba = buffer;
-
-    return rt;
-}}
 
 fn print_message(msg: &str) -> Result<i32, Error> {
     use std::ffi::OsStr;

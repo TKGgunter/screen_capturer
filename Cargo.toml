@@ -11,5 +11,5 @@ path = "tensorflow-sys-tools/"
 path = "miniz/"
 
 [dependencies]
-ndarray = "*"
-winapi = { version = "0.3.6", features = ["winuser", "xinput", "windef", "wingdi", "winnt", "libloaderapi", "memoryapi", "processenv"] }
+#ndarray = "*"
+winapi = { version = "0.3.6", features = ["winuser", "xinput", "windef", "wingdi", "winnt", "libloaderapi", "memoryapi", "processenv", "mmdeviceapi", "combaseapi", "audioclient"] }

@@ -36,7 +36,7 @@ impl TGBasicModel{
             output: TF_Output::new(),
         }
     }}
-    pub fn load_graph_from_file(&mut self, filename: &str, io: Option<[&str; 2]>)->Result<(), &str>{unsafe{
+    pub fn init(&mut self)->Result<(), String>{unsafe{
         self.status = TF_NewStatus();
         self.graph = TF_NewGraph();
         {
@@ -46,7 +46,15 @@ impl TGBasicModel{
             let opts = TF_NewSessionOptions();
             self.session = TF_NewSession(self.graph, opts, self.status);
             TF_DeleteSessionOptions(opts);
-            if Okay(self.status).is_err() {return Err("Status fail.");}
+            if Okay(self.status).is_err() {return Err("Status fail.".to_string());}
+        }
+        Ok(())
+    }}
+    pub fn load_graph_from_file(&mut self, filename: &str, io: Option<[&str; 2]>)->Result<(), String>{unsafe{
+        let init_result = self.init();
+        match init_result {
+            Err(e)=>return Err(e),
+            _=>{},
         }
 
         let mut g = self.graph;
@@ -63,14 +71,14 @@ impl TGBasicModel{
                 ret
             };
             //let mut graph_def = ReadFile(filename);
-            if graph_def == null_mut(){ return Err("Graph dead!");}
+            if graph_def == null_mut(){ return Err("Graph dead!".to_string());}
             let mut opts = TF_NewImportGraphDefOptions();
             TF_GraphImportGraphDef(g, graph_def, opts, self.status);
 
             TF_DeleteImportGraphDefOptions(opts);
             TF_DeleteBuffer(graph_def);
 
-            if Okay(self.status).is_err() { return Err("Status fail!"); }
+            if Okay(self.status).is_err() { return Err("Status fail!".to_string()); }
         }
 
         match io{
@@ -99,8 +107,8 @@ impl TGBasicModel{
             }
         }
 
-        if self.input.oper == null_mut() { return Err("input DEAD");}
-        if self.output.oper == null_mut() { return Err("output DEAD");}
+        if self.input.oper == null_mut() { return Err("input DEAD".to_string());}
+        if self.output.oper == null_mut() { return Err("output DEAD".to_string());}
 
         return Ok(());
     }}
@@ -171,4 +179,125 @@ impl TGBasicModel{
         return Ok(rt);
     }}
 
+}
+
+pub mod Ops{
+use crate::tensorflow_bindings::*;
+
+use std::fs::{File, create_dir, read_dir};
+use std::io::prelude::*;
+use std::ptr::{null, null_mut};
+
+
+    pub fn AddN(l: &[*mut TF_Operation], r: *mut TF_Operation, graph: *mut TF_Graph,
+                   s: *mut TF_Status, check: bool)->*mut TF_Operation {unsafe{
+
+        let desc = TF_NewOperation(graph, "AddN\0".as_ptr() as *const _, "test\0".as_ptr() as *const _);
+
+        let mut add_inputs = Vec::new();
+        for it in l{
+            add_inputs.push(TF_Output{oper: it.clone(), index: 0});
+        }
+        TF_AddInputList(desc, add_inputs.as_ptr() as *mut _, add_inputs.len() as _);
+
+        let op = TF_FinishOperation(desc, s);
+
+        assert_eq!(TF_Code::TF_OK, TF_GetCode(s), "add ops: {:?}", &std::ffi::CStr::from_ptr(TF_Message(s)) );
+        assert_ne!(op, null_mut());
+
+        return op;
+    }}
+
+
+    macro_rules! op_algebra_helper{
+        //TODO
+        //change name of function to something less general
+        ($ops:tt)=>{  pub fn $ops(l: *mut TF_Operation, r: *mut TF_Operation, graph: *mut TF_Graph, 
+                              s: *mut TF_Status, name: &str)->*mut TF_Operation {unsafe{
+
+                          let ops_string = std::ffi::CString::new(stringify!($ops)).expect("No a proper cstring");
+                          let name_string = std::ffi::CString::new(name).expect("No a proper cstring");
+
+                          //TODO 
+                          //"test" needs to be removed for something more dynamic
+                          let desc = TF_NewOperation(graph, ops_string.into_raw() as *const _, name_string.into_raw() as *const _);
+
+                          let add_inputs = [TF_Output{oper: l, index: 0}, TF_Output{ oper: r, index: 0}];
+                          TF_AddInput(desc, add_inputs[0]);
+                          TF_AddInput(desc, add_inputs[1]);
+
+                          let op = TF_FinishOperation(desc, s);
+
+                          assert_eq!(TF_Code::TF_OK, TF_GetCode(s), "{} ops: {:?}", stringify!($ops), &std::ffi::CStr::from_ptr(TF_Message(s)) );
+                          assert_ne!(op, null_mut());
+
+                          return op;
+                      }}
+                   };
+    }
+
+    op_algebra_helper!(AddV2);
+    op_algebra_helper!(Sub);
+    op_algebra_helper!(Mul);
+    op_algebra_helper!(Div);
+    op_algebra_helper!(Pow);
+    op_algebra_helper!(Mod);
+
+    pub fn PlaceholderHelper(graph: *mut TF_Graph, s: *mut TF_Status, name: &str,
+                           dtype: TF_DataType, dims: &[i64])->TF_Output {unsafe{
+
+        let _name = std::ffi::CString::new(name).unwrap();
+        let desc = TF_NewOperation(graph, "Placeholder\0".as_ptr() as *const _, _name.into_raw() as *const _);
+
+        TF_SetAttrType(desc, "dtype\0".as_ptr() as *const _, dtype);
+        if (dims.len() != 0) {
+            TF_SetAttrShape(desc, "shape\0".as_ptr() as *const _, dims.as_ptr(), dims.len() as i32);
+        }
+        let op = TF_FinishOperation(desc, s);
+
+        assert_eq!(TF_Code::TF_OK, TF_GetCode(s), "{:?}", &std::ffi::CStr::from_ptr(TF_Message(s)));
+        assert_ne!(op, null_mut());
+        
+        return TF_Output{ oper: op, index: 0};
+    }}
+
+
+
+    pub fn ConstHelper(t: *mut TF_Tensor, graph: *mut TF_Graph, s: *mut TF_Status,
+                       name: &str)->*mut TF_Operation {unsafe{
+        let _name = std::ffi::CString::new(name).expect("const helper");
+
+        let desc = TF_NewOperation(graph, "Const\0".as_ptr() as *const _, _name.into_raw() as *mut _);
+        TF_SetAttrTensor(desc, "value\0".as_ptr() as *mut _, t, s);
+
+        assert_eq!(TF_Code::TF_OK, TF_GetCode(s), "const helper {:?}", &std::ffi::CStr::from_ptr(TF_Message(s)) );
+
+        TF_SetAttrType(desc, "dtype\0".as_ptr() as *mut _, TF_TensorType(t));
+        let op = TF_FinishOperation(desc, s);
+
+        assert_eq!(TF_Code::TF_OK, TF_GetCode(s), "const helper 2 {:?}",TF_Message(s));
+        assert_ne!(op, null_mut());
+
+        return op;
+    }}
+
+
+    //TODO
+    //should not be placed here also this is too restictive to be a proper wrapper
+    pub fn FloatTensor(v: f32)->*mut TF_Tensor {unsafe{
+        let num_bytes = 4;
+        let values = [v];
+        let t = TF_NewTensor(TF_DataType::TF_FLOAT, null(), 0, values.as_ptr() as *mut _, num_bytes,
+                            deallocator, null_mut());
+
+        return t;
+    }}
+
+
+
+    unsafe extern "C" fn deallocator(data: *mut std::ffi::c_void, _u: usize, _ptr: *mut std::ffi::c_void) { unsafe{ 
+          //NOTE 
+          //I don't think this drops a damn thing
+          //println!("trying to dealloc but we can't right now!!");
+    }}
 }
