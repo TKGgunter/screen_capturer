@@ -2,6 +2,7 @@
 extern crate winapi;
 extern crate stb_tt_sys;
 extern crate tensorflow_sys_tools;
+extern crate multiinput;
 //extern crate miniz; for use at some future date
 
 
@@ -29,9 +30,27 @@ use tensorflow_sys_tools::tensorflow_bindings::tensorflow_init;
 
 
 
-const C4_YELLOW :[f32;4]= [1.0, 1.0, 0.0, 1.0];
-const C4_WHITE  :[f32;4]= [1.0, 1.0, 1.0, 1.0];
-const C4_BLACK :[f32;4] = [0.0, 0.0, 0.0, 1.0];
+//AUDIO  CAPTURE STUFF
+use winapi::um::combaseapi::{CoCreateInstance, CLSCTX_ALL};
+use winapi::um::mmdeviceapi::{CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole, IMMDevice};
+use winapi::um::audioclient::{IID_IAudioClient, IAudioClient, IID_IAudioCaptureClient, IAudioCaptureClient, AUDCLNT_BUFFERFLAGS_SILENT};
+use winapi::um::audiosessiontypes::{AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_SHAREMODE_SHARED};
+use winapi::shared::guiddef::GUID;
+use winapi::shared::mmreg::WAVEFORMATEX;
+use winapi::Interface;
+use winapi::um::dsound;
+use winapi::um::dsound::IDirectSound;
+
+use multiinput::RawInputManager;
+
+
+
+const C4_YELLOW :[f32;4] = [1.0, 1.0, 0.0, 1.0];
+const C4_WHITE  :[f32;4] = [1.0, 1.0, 1.0, 1.0];
+const C4_BLUE   :[f32;4] = [0.0, 0.0, 1.0, 1.0];
+const C4_BLACK  :[f32;4] = [0.0, 0.0, 0.0, 1.0];
+const C4_GREY   :[f32;4] = [0.1, 0.1, 0.1, 1.0];
+const C4_RED    :[f32;4] = [1.0, 0.0, 0.0, 1.0];
 
 /*
 100 images per run
@@ -811,6 +830,12 @@ extern "system" fn window_callback(window: HWND, message: u32, w_param: usize, l
     return rt;
 }}
 fn make_window(){unsafe{
+    //TODO temp
+    let mut manager = RawInputManager::new().unwrap();
+    manager.register_devices(multiinput::DeviceType::Joysticks(multiinput::XInputInclude::False));
+    //
+
+
     use user32::{RegisterClassW, CreateWindowExW, TranslateMessage, DispatchMessageW, PeekMessageW, LoadCursorW};
     use winapi::um::winuser::{ WNDCLASSW, CW_USEDEFAULT, WS_OVERLAPPEDWINDOW, WS_VISIBLE, MSG, IDC_ARROW};
     use winapi::shared::windef::POINT;
@@ -819,8 +844,10 @@ fn make_window(){unsafe{
     let commandline = winapi::um::processenv::GetCommandLineA();
 
     let mut mouseinfo = MouseInfo::new();
+    let mut joystickinfo : JoystickInfo = Default::default();
     let mut app_data = AppData::new();
     let time_instance = time::Instant::now();
+
     //NOTE
     //We are missing cmd show. Not sure if we will event need it....
 
@@ -956,9 +983,55 @@ fn make_window(){unsafe{
                     TranslateMessage(&mut message as *mut MSG);
                     DispatchMessageW(&mut message as *mut MSG);
                 }
+
+                //NOTE
+                //The joystick setup is particular to my personal Hori
+                if let Some(event) = manager.get_event(){
+                    match event{
+                        multiinput::event::RawEvent::JoystickButtonEvent(_usize_id, _1usize, _State)=>{ 
+                            use multiinput::event::State;
+
+                            match _State{
+                                //TODO Double check me
+                                State::Pressed => {
+                                    if _1usize == 0 { joystickinfo.x = ButtonStatus::Down; }
+                                    if _1usize == 1 { joystickinfo.a = ButtonStatus::Down; }
+                                    if _1usize == 2 { joystickinfo.b = ButtonStatus::Down; }
+                                    if _1usize == 3 { joystickinfo.y = ButtonStatus::Down; }
+                                    if _1usize == 5 { joystickinfo.rb = ButtonStatus::Down; }
+                                    if _1usize == 7 { joystickinfo.lb = ButtonStatus::Down; }
+                                    if _1usize == 4 { joystickinfo.lt = ButtonStatus::Down; }
+                                    if _1usize == 6 { joystickinfo.rt = ButtonStatus::Down; }
+                                },
+                                State::Released => {
+                                    if _1usize == 0 { joystickinfo.x = ButtonStatus::Up; }
+                                    if _1usize == 1 { joystickinfo.a = ButtonStatus::Up; }
+                                    if _1usize == 2 { joystickinfo.b = ButtonStatus::Up; }
+                                    if _1usize == 3 { joystickinfo.y = ButtonStatus::Up; }
+                                    if _1usize == 5 { joystickinfo.rb = ButtonStatus::Up; }
+                                    if _1usize == 7 { joystickinfo.lb = ButtonStatus::Up; }
+                                    if _1usize == 4 { joystickinfo.lt = ButtonStatus::Up; }
+                                    if _1usize == 6 { joystickinfo.rt = ButtonStatus::Up; }
+                                },
+                                _=>{}
+                            }
+                        },
+                        multiinput::event::RawEvent::JoystickAxisEvent( _usize_id, _Axis,  _f64)=>{ 
+                            use multiinput::event::Axis;
+                            match _Axis{ 
+                                Axis::X => { joystickinfo.axis_x = _f64 as f32; },
+                                Axis::Y => { joystickinfo.axis_y = _f64 as f32; },
+                                _=>{}
+                            }
+                        },
+                        multiinput::event::RawEvent::JoystickHatSwitchEvent(_usize_id, _HatSwitch)=>{ println!("hatswitch {:?}", _HatSwitch); },
+                        _=>{}
+                    }
+                }
+
                 renderDefaultToBuffer(&mut GLOBAL_BACKBUFFER, None);
 
-                if app_main(&mut app_data, &keyboardinfo, &textinfo, &mouseinfo, nframes, time_instance.elapsed()) != 0 { break 'a; }
+                if app_main(&mut app_data, &keyboardinfo, &joystickinfo, &textinfo, &mouseinfo, nframes, time_instance.elapsed(), window_handle) != 0 { break 'a; }
 
                 //NOTE
                 //Whats the difference between get client rect and get window rect
@@ -1020,12 +1093,18 @@ fn main() {
 //
 //}
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 enum ButtonStatus{
     Up,
     Down,
     Default
 }
+impl Default for ButtonStatus{
+    fn default()->ButtonStatus{
+        ButtonStatus::Default
+    }
+}
+
 struct MouseInfo{
     x: i32,
     y: i32,
@@ -1063,6 +1142,21 @@ enum KeyboardEnum{
 struct KeyboardInfo{
     key: Vec<KeyboardEnum>,
     status: Vec<ButtonStatus>,
+}
+
+#[derive(Default, Debug)]
+struct JoystickInfo{
+    x : ButtonStatus,
+    y : ButtonStatus,
+    a : ButtonStatus,
+    b : ButtonStatus,
+    lb : ButtonStatus,
+    rb : ButtonStatus,
+    lt : ButtonStatus,
+    rt : ButtonStatus,
+
+    axis_x: f32,
+    axis_y: f32,
 }
 
 #[derive(Clone)]
@@ -1254,6 +1348,9 @@ impl<T: PartialEq, V> TGMap<T, V>{
         println!("Something is not map");
         return &mut self.values[0];
     }
+    pub fn len(&self)->usize{
+        self.keys.len()
+    }
 }
 
 
@@ -1392,6 +1489,85 @@ impl RectangleAppData{
     }
 }
 
+
+
+
+const MAX_SOUND_DATA :usize = 48000*2*4;
+struct CassetteTape {
+    begin_marker: usize, 
+    end_marker  : usize, 
+    data  : Vec<f32>,
+}
+
+impl CassetteTape{
+    pub fn new()->CassetteTape{
+        CassetteTape {
+            begin_marker: std::usize::MAX, 
+            end_marker  : std::usize::MAX, 
+            data        : vec![0f32; MAX_SOUND_DATA],
+        }
+    }
+    pub fn save(&self, filename: &str){
+        let mut filebuffer = File::create(filename).expect("Could not write file.");
+        filebuffer.write( &transmute(&['C' as std::os::raw::c_char, 'T' as std::os::raw::c_char]) );
+        filebuffer.write( &transmute(&self.begin_marker) );
+        filebuffer.write( &transmute(&self.end_marker) );
+
+        let data_len = self.data.len();
+        let data = &self.data[0] as *const f32 as *const u8;
+        let _data = unsafe{ std::slice::from_raw_parts(data, data_len) };
+        filebuffer.write( _data );
+        
+    }
+}
+
+struct SoundAppData{
+    init : bool,
+
+    enumerator_ptr   : *mut winapi::ctypes::c_void,
+    device_ptr       : *mut IMMDevice,
+    audioclient_ptr  : *mut winapi::ctypes::c_void,
+    audio_prefs      : *mut WAVEFORMATEX,
+    captureclient_ptr: *mut winapi::ctypes::c_void,
+    recorded_buffer  : Vec<f32>, //; MAX_SOUND_DATA]>,
+
+    record_on: bool,
+    to_be_filled: isize,
+    button_press_marker: usize,
+
+    tape_deck: TGMap<String, CassetteTape>,//TODO add marker to tape 
+    textbox  : TextBox,
+
+    dsound_obj : dsound::LPDIRECTSOUND,
+
+}
+
+impl SoundAppData{
+    pub fn new()->SoundAppData{
+        SoundAppData{
+            init: false,
+
+            enumerator_ptr   : null_mut(),
+            device_ptr       : null_mut(),
+            audioclient_ptr  : null_mut(),
+            audio_prefs      : null_mut(),
+            captureclient_ptr: null_mut(),
+            recorded_buffer  : vec![0f32; MAX_SOUND_DATA],
+  
+            record_on           : false,
+            to_be_filled        : MAX_SOUND_DATA as isize,
+            button_press_marker : std::usize::MAX,
+
+            tape_deck : TGMap::new(), 
+            textbox   : TextBox::new(),
+
+            dsound_obj       : null_mut(),
+        }
+    }
+}
+
+
+
 enum MenuEnum{
     screenshot,
     ai,
@@ -1434,6 +1610,7 @@ struct AppData{
     root_folder_update_box_color: [f32;4],
 
     image_prepend_name_textbox: TextBox,
+    image_counter : usize,
 
     number_of_shots_to_take_textbox: TextBox,
 
@@ -1458,6 +1635,7 @@ struct AppData{
     //AI DATA//
     ai_data: AiAppData,
     rect_data: RectangleAppData,
+    sound_data: SoundAppData,
 
     handle_dc: Option<WindowHandleDC>,
 }
@@ -1465,7 +1643,9 @@ impl AppData{
     pub fn new()->AppData{
         let mut capture_exe_textbox = TextBox::new();
         capture_exe_textbox.text_buffer = "Guilty Gear Xrd -REVELATOR-".to_string();
-        capture_exe_textbox.text_buffer = "MELTY BLOOD Actress Again Current Code".to_string();
+        //capture_exe_textbox.text_buffer = "MELTY BLOOD Actress Again Current Code".to_string();
+        //capture_exe_textbox.text_buffer = "Skullgirls Encore".to_string();
+        capture_exe_textbox.text_buffer = "SSFIVAE".to_string();
 
         let mut root_folder_textbox = TextBox::new();
         root_folder_textbox.text_buffer = "temp".to_string();
@@ -1478,7 +1658,7 @@ impl AppData{
 
 
         AppData{
-            current_app: MenuEnum::sound,
+            current_app: MenuEnum::rect,
             global_menu_data: MenuData::new(),
 
             capture_exe_textbox: capture_exe_textbox,
@@ -1496,6 +1676,7 @@ impl AppData{
             root_folder_update_box_color: [1.0, 0.2, 0.0, 0.0],
 
             image_prepend_name_textbox: image_prepend_name_textbox,
+            image_counter : 0,
 
             number_of_shots_to_take_textbox: number_of_shots_to_take_textbox,
 
@@ -1520,6 +1701,8 @@ impl AppData{
 
             ai_data: AiAppData::new(),
             rect_data: RectangleAppData::new(),
+
+            sound_data: SoundAppData::new(),
 
             handle_dc: None,
         }
@@ -1584,8 +1767,8 @@ fn menu(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
          }
     }
 }}
-fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
-    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{
+fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration, window_handle: HWND)->i32{
     match app_data.current_app{
         MenuEnum::screenshot => {
             return app_screencapture(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
@@ -1597,152 +1780,403 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
             return app_rectangle(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
         },
         MenuEnum::sound => {
-            return app_sound(app_data, keyboardinfo, textinfo, mouseinfo, frames, time_instance);
+            return app_sound(app_data, keyboardinfo, joystickinfo, textinfo, mouseinfo, frames, time_instance, window_handle);
         }
     }
     return 0;
 }
 
-fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
-    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration)->i32{unsafe{
+fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration, window_handle: HWND)->i32{unsafe{
+    //TODO
+    //save output
 
     let REFTIMES_PER_SEC  = 10000000;
     let REFTIMES_PER_MILLISEC  = 10000;
 
+
+    let requested_duration = REFTIMES_PER_SEC;
+
     drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.05, 0.2, 0.05, 1.0], true);
-    drawString(&mut GLOBAL_BACKBUFFER, "Something sounds like a rectangular sailor", 350, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "SOUNDS like a sailor", 300, 450, [1.0, 1.0, 1.0, 1.0], 34.0);
 
 
 
     //The following code is roughly based off of example code found in 
     //https://docs.microsoft.com/en-us/windows/win32/coreaudio/capturing-a-stream
-    use winapi::um::combaseapi::{CoCreateInstance, CLSCTX_ALL};
-    use winapi::um::mmdeviceapi::{CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole, IMMDevice};
-    use winapi::um::audioclient::{IID_IAudioClient, IAudioClient, IID_IAudioCaptureClient, IAudioCaptureClient, AUDCLNT_BUFFERFLAGS_SILENT};
-    use winapi::um::audiosessiontypes::{AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_SHAREMODE_SHARED};
-    use winapi::shared::guiddef::GUID;
-    use winapi::shared::mmreg::WAVEFORMATEX;
-    use winapi::Interface;
-
-
-
-    let mut pEnumerator = null_mut();
-    let hr = CoCreateInstance(&CLSID_MMDeviceEnumerator as *const _, null_mut(), CLSCTX_ALL, &IMMDeviceEnumerator::uuidof() as *const _,  &mut pEnumerator as *mut _);
-    println!("Result of CoCreateInstance {}", hr);
-
+    //use winapi::um::combaseapi::{CoCreateInstance, CLSCTX_ALL};
+    //use winapi::um::mmdeviceapi::{CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, eRender, eConsole, IMMDevice};
+    //use winapi::um::audioclient::{IID_IAudioClient, IAudioClient, IID_IAudioCaptureClient, IAudioCaptureClient, AUDCLNT_BUFFERFLAGS_SILENT};
+    //use winapi::um::audiosessiontypes::{AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_SHAREMODE_SHARED};
+    //use winapi::shared::guiddef::GUID;
+    //use winapi::shared::mmreg::WAVEFORMATEX;
+    //use winapi::Interface;
 
     macro_rules! deref{
-        ($x:tt, $y:tt)=>{
+        ($x:expr, $y:ty)=>{
             (*($x as *mut $y))
         }
     }
 
-    let mut pDevice = null_mut();
-    let hr = deref!(pEnumerator, IMMDeviceEnumerator).GetDefaultAudioEndpoint(eRender, eConsole, &mut pDevice as *mut _);
-    println!("Result of GetDefaultAudioEndpoint {}", hr);
 
-   
-    let mut pAudioClient = null_mut();
-    let hr = deref!(pDevice, IMMDevice).Activate(&IID_IAudioClient as *const _, CLSCTX_ALL, null_mut(), &mut pAudioClient as *mut _);
-    println!("Result of Active {}", hr);
+    let sound_data = &mut app_data.sound_data;
+    if sound_data.init == false {
+        sound_data.init = true;
 
-
-
-    let mut pwfx = null_mut();
-    let hr = deref!(pAudioClient, IAudioClient).GetMixFormat(&mut pwfx as *mut _);
-    println!("Result of GetMixFormat {}", hr);
-   
-
-    let mut hnsRequestedDuration = REFTIMES_PER_SEC;
-    let hr = deref!(pAudioClient, IAudioClient).Initialize(
-                         AUDCLNT_SHAREMODE_SHARED,
-                         AUDCLNT_STREAMFLAGS_LOOPBACK,
-                         hnsRequestedDuration,
-                         0,
-                         pwfx as *mut _,
-                         null_mut()); 
-    println!("Result of Initiaize {}", hr);
-
-
-    let mut buffersize = 0u32;
-    let hr = deref!(pAudioClient, IAudioClient).GetBufferSize(&mut buffersize as *mut _);
-    println!("Result of GetBufferSize {}; BufferSize {}", hr, buffersize);
+        sound_data.textbox.text_buffer += "demo";
+        sound_data.textbox.x = 50;
+        sound_data.textbox.y = 370;
 
 
 
-    let mut pCaptureClient = null_mut();
-    let hr = deref!(pAudioClient, IAudioClient).GetService(
-                     &IID_IAudioCaptureClient as *const _,
-                     &mut pCaptureClient as *mut _);
-    println!("Result of GetService {}", hr);
+        let hr = CoCreateInstance(&CLSID_MMDeviceEnumerator as *const _, null_mut(), CLSCTX_ALL, &IMMDeviceEnumerator::uuidof() as *const _,  
+                                  &mut sound_data.enumerator_ptr as *mut _);
+        assert!(hr==0,"Result of CoCreateInstance {} {:?} {}", hr, sound_data.enumerator_ptr, sound_data.init);
 
 
-    println!("waveformat");
-    println!("formattag: {:?}", deref!(pwfx, WAVEFORMATEX).wFormatTag);
-    println!("nChannels: {:?}", deref!(pwfx, WAVEFORMATEX).nChannels);
-    println!("nSamplesPerSec: {:?}", deref!(pwfx, WAVEFORMATEX).nSamplesPerSec);
-    println!("BitsPerSample: {:?}", deref!(pwfx, WAVEFORMATEX).wBitsPerSample);
-    println!("nBlockAlign: {:?}", deref!(pwfx, WAVEFORMATEX).nBlockAlign);
-    println!("cbSize: {:?}", deref!(pwfx, WAVEFORMATEX).cbSize);
+        let hr = deref!(sound_data.enumerator_ptr, IMMDeviceEnumerator).GetDefaultAudioEndpoint(eRender, eConsole, &mut sound_data.device_ptr as *mut _);
+        assert!(hr==0,"Result of GetDefaultAudioEndpoint {}", hr);
+        
+        let hr = deref!(sound_data.device_ptr, IMMDevice).Activate(&IID_IAudioClient as *const _, CLSCTX_ALL, null_mut(), &mut sound_data.audioclient_ptr as *mut _);
+        assert!(hr==0,"Result of Active {}", hr);
+        
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).GetMixFormat(&mut sound_data.audio_prefs as *mut _);
+        assert!(hr==0,"Result of GetMixFormat {}", hr);
 
 
-    let hnsActualDuration = REFTIMES_PER_SEC as u64 *
-                     buffersize as u64 / deref!(pwfx, WAVEFORMATEX).nSamplesPerSec as u64;
-    println!("Actual Duration: {}", hnsActualDuration);
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).Initialize(
+                             AUDCLNT_SHAREMODE_SHARED,
+                             AUDCLNT_STREAMFLAGS_LOOPBACK,
+                             requested_duration,
+                             0,
+                             sound_data.audio_prefs as *mut _,
+                             null_mut()); 
+        assert!(hr==0,"Result of Initiaize {}", hr);
+
+
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).GetService(
+                         &IID_IAudioCaptureClient as *const _,
+                         &mut sound_data.captureclient_ptr as *mut _);
+        assert!(hr==0,"Result of GetService {}", hr);
+
+
+        //TODO
+        //Init DSound
+        /* 
+        let hr = dsound::DirectSoundCreate( null_mut(), &mut sound_data.dsound_obj, null_mut());
+        println!("Result of DirectSoundCreate {}", hr);
+       
+
+        let hr = deref!(sound_data.dsound_obj, IDirectSound).SetCooperativeLevel(window_handle, dsound::DSSCL_PRIORITY);
+        println!("Result of SetCooperativeLevel {}", hr);
+
+
+        //TODO
+        //Store the following in app data
+        let mut buffer_desc : dsound::DSBUFFERDESC = Default::default();
+        buffer_desc.dwSize  = mem::size_of::<dsound::DSBUFFERDESC>() as u32;
+        buffer_desc.dwFlags = dsound::DSBCAPS_PRIMARYBUFFER; 
+
+        let mut primary_buffer : dsound::LPDIRECTSOUNDBUFFER = null_mut();
+
+        let hr = deref!(sound_data.dsound_obj, IDirectSound).CreateSoundBuffer( &mut buffer_desc as dsound::LPCDSBUFFERDESC, &mut primary_buffer as *mut dsound::LPDIRECTSOUNDBUFFER, null_mut() );
+        println!("Result of CreateSoundBuffer {}", hr);
+
+        let hr = deref!(primary_buffer, dsound::IDirectSoundBuffer).SetFormat( sound_data.audio_prefs );
+        println!("Result of SetFormat {}", hr);
 
 
 
-    let hr = deref!(pAudioClient, IAudioClient).Start();
-    println!("start recording audio {}", hr);
-    {
-        std::thread::sleep(time::Duration::from_millis(hnsActualDuration/REFTIMES_PER_MILLISEC/2));
+        let mut secondary_buffer_desc : dsound::DSBUFFERDESC = Default::default();
+        secondary_buffer_desc.dwSize  = mem::size_of::<dsound::DSBUFFERDESC>() as u32;
+        secondary_buffer_desc.dwFlags = dsound::DSBCAPS_CTRLPAN | dsound::DSBCAPS_CTRLVOLUME | dsound::DSBCAPS_CTRLFREQUENCY;
+        secondary_buffer_desc.dwBufferBytes = 48000; 
+        secondary_buffer_desc.lpwfxFormat   = sound_data.audio_prefs; 
+        
+        let mut secondary_buffer : dsound::LPDIRECTSOUNDBUFFER = null_mut();
+        let hr = deref!(sound_data.dsound_obj, IDirectSound).CreateSoundBuffer( &mut secondary_buffer_desc as dsound::LPCDSBUFFERDESC, &mut secondary_buffer as *mut dsound::LPDIRECTSOUNDBUFFER, null_mut() );
+        println!("Result of CreateSoundBuffer <Secondary>{} {:?}", hr, secondary_buffer);
 
+ 
+        let mut playcursor = 0u32;
+        let mut writecursor = 0u32;
+        let hr = deref!(secondary_buffer, dsound::IDirectSoundBuffer).GetCurrentPosition( &mut playcursor as *mut _, &mut writecursor as *mut _);
+        println!("Result of currentposition {} {} {}", hr, playcursor, writecursor);
 
-        let mut packetLength = 0u32;
-        let hr = deref!(pCaptureClient, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
-        println!("GetNextPacket size run: {}\n Next Packet size {}", hr, packetLength); 
+        let mut region1 = null_mut();
+        let mut region1_size = 0u32;
+        let mut region2 = null_mut();
+        let mut region2_size = 0u32;
+        let offset = 0;
+        let bytes  = 100;
+        let hr = deref!(secondary_buffer, dsound::IDirectSoundBuffer).Lock(
+            0,
+            0,
+            &mut region1 as *mut _, &mut region1_size as *mut _,
+            null_mut(), null_mut(),//&mut region2_size as *mut _,
+            2
+        );
+        println!("Result of Lock {} {:?} {}", hr, region1, region1_size);
 
-        while packetLength != 0
         {
-            let mut pData = null_mut();
-            let mut numFramesAvailable = 0u32;
-            let mut flags = 0u32;
-            // Get the available data in the shared buffer.
-            let hr = deref!(pCaptureClient, IAudioCaptureClient).GetBuffer(
-                                   &mut pData as *mut _,
-                                   &mut numFramesAvailable as *mut _,
-                                   &mut flags as *mut _, null_mut(), null_mut());
-            println!("Get Buffer {}", hr);
-            println!("numFramesAvailable: {}", numFramesAvailable);
-            println!("flags: {}", flags);
-
-            //Prob wrong
-            if (flags & AUDCLNT_BUFFERFLAGS_SILENT == 1)
-            {
-                pData = null_mut();  // Tell CopyData to write silence.
+            //let mut slice = std::slice::from_raw_parts_mut(region1 as *mut i32, 13000 as usize); //region1_size as usize);
+            let mut sign = 1;
+            for i in 0..13000{//Square wave
+              
+                if i%100*2 == 0 { sign *=-1; }
+                *(region1 as *mut i32).offset(i) = sign*10000;
+                //if i%50 ==0 { println!("{} ASDFASDF", i); }
             }
+        }
+        println!("ASDFASDFADFSADFADFSADFA");
 
-            //NOTE
-            //Currently I'm under the impression that audio should be interacted in 32 bit chuncks where 
-            //the first 2 bytes are good data and the last two are junk(this might just be a function of channels)
-            //The first 2 bytes are the left and right channels (I don't know which is which)
-            let slice = std::slice::from_raw_parts_mut(pData, (numFramesAvailable) as usize);
-            println!("{:?}", slice);
-
-            let hr = deref!(pCaptureClient, IAudioCaptureClient).ReleaseBuffer(numFramesAvailable);
-            println!("ReleaseBuffer {}", hr);
+        let hr = deref!(secondary_buffer, dsound::IDirectSoundBuffer).Unlock(
+            region1, region1_size,
+            region2, region2_size,
+        );
+        println!("Result of Unlock {}", hr);
 
 
-            let hr = deref!(pCaptureClient, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
-            println!("Get NextPacketSize {}", hr);
-    panic!("EXIT");
+        let hr = deref!(secondary_buffer, dsound::IDirectSoundBuffer).Play(0, 0, 0);//dsound::DSBPLAY_LOOPING);
+        println!("Result of play {}", hr);
+
+        //let hr = deref!(secondary_buffer, dsound::IDirectSoundBuffer).Stop();
+        //println!("Result of stop {}", hr);
+
+        panic!("HELP");
+        */
+    }
+
+    
+    {//Checking  inputs
+        if textinfo.character == ' ' && sound_data.record_on == false{
+            sound_data.record_on = true; 
+            sound_data.to_be_filled = MAX_SOUND_DATA as isize;
+        }
+        if textinfo.character != ' ' && textinfo.character != '\0'{
+            sound_data.button_press_marker = MAX_SOUND_DATA - sound_data.to_be_filled as usize;
+        }
+
+        //TODO
+        //We really should move gamepad stuff out side of individual apps
+        let mut temp_xgamepad = xinput::XINPUT_STATE{
+                                    dwPacketNumber: 0,
+                                    Gamepad: xinput::XINPUT_GAMEPAD{
+                                        wButtons: 0,
+                                        bLeftTrigger: 0,
+                                        bRightTrigger: 0,
+                                        sThumbLX: 0,
+                                        sThumbLY: 0,
+                                        sThumbRX: 0,
+                                        sThumbRY: 0,
+                                  }};
+        let _temp = xinput::XInputGetState(0, &mut temp_xgamepad as *mut xinput::XINPUT_STATE);
+        if temp_xgamepad.Gamepad.wButtons != 0x00 {
+            sound_data.button_press_marker = MAX_SOUND_DATA - sound_data.to_be_filled as usize;
+        } 
+    }
+
+    {//Tape deck
+        sound_data.textbox.update( keyboardinfo, textinfo, mouseinfo );
+        sound_data.textbox.draw( time_instance.subsec_nanos() as f32 );
+        
+        let x = sound_data.textbox.x;
+        let y = sound_data.textbox.y;
+        for i in 0..sound_data.tape_deck.len(){
+            
+            let _i = i as i32 + 1;
+            let _y = y - _i*15;
+            let offset = drawString(&mut GLOBAL_BACKBUFFER, &format!("{}.  ", _i), x, _y, C4_WHITE, 18.0);
+            let length = drawString(&mut GLOBAL_BACKBUFFER, 
+                                    &sound_data.tape_deck.keys[i], 
+                                    x+offset, _y, C4_WHITE, 18.0);
+
+            if in_rect( mouseinfo.x, mouseinfo.y, [x-1, _y, length+offset+15, 19]) {
+                drawRect(&mut GLOBAL_BACKBUFFER,  [x-1, _y, length+offset+15, 19], C4_WHITE, false);
+                drawString(&mut GLOBAL_BACKBUFFER, "SAVE", x+length+offset+15, _y, C4_GREY, 19.0);
+
+                if mouseinfo.lbutton == ButtonStatus::Down{
+                    drawString(&mut GLOBAL_BACKBUFFER, "SAVE", x+length+offset+15, _y, C4_RED, 19.0);
+                }
+
+                //SAVE DATA
+                if mouseinfo.lbutton == ButtonStatus::Up && mouseinfo.old_lbutton == ButtonStatus::Down{
+                    //TODO set directory some other way
+                    let mut filename = "training_testing_data/audio/".to_string();
+                    filename = filename + &sound_data.tape_deck.keys[i];
+                    filename = filename + ".ct";
+                    sound_data.tape_deck.values[i].save(&filename);
+                }
+            }
+        }
+        //TODO
+        //user feed back needed when save is successful
+        //drawString(&mut GLOBAL_BACKBUFFER, "SAVED", 15, 15, [1.0, 1.0, 1.0, sound_data.], 32.0);
+    } 
+
+
+    {//Instructions
+        drawString(&mut GLOBAL_BACKBUFFER, "Instructions:", 50, 450, C4_YELLOW, 22.0);
+        drawString(&mut GLOBAL_BACKBUFFER, "Press space bar to begin recording.", 50, 425, C4_YELLOW, 22.0);
+        
+    }
+    {//TOGGLE record_on
+        if sound_data.record_on {
+            drawString(&mut GLOBAL_BACKBUFFER, "RECORDING: ON", 350, 400, C4_WHITE, 28.0);
+        } else{
+            drawString(&mut GLOBAL_BACKBUFFER, "RECORDING: OFF", 350, 400, C4_WHITE, 28.0);
         }
     }
-    let hr = deref!(pAudioClient, IAudioClient).Stop();
-    println!("stop recording audio {}", hr);
+
+    if sound_data.record_on {
+        let mut buffersize = 0u32;
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).GetBufferSize(&mut buffersize as *mut _);
+        assert!(hr==0,"Result of GetBufferSize {}; BufferSize {}", hr, buffersize);
+
+        /*
+        println!("\nWaveformat");
+        println!("formattag: {:?}",       deref!(sound_data.audio_prefs, WAVEFORMATEX).wFormatTag);
+        println!("nChannels: {:?}",       deref!(sound_data.audio_prefs, WAVEFORMATEX).nChannels);
+        println!("nSamplesPerSec: {:?}",  deref!(sound_data.audio_prefs, WAVEFORMATEX).nSamplesPerSec);
+        println!("BitsPerSample: {:?}",   deref!(sound_data.audio_prefs, WAVEFORMATEX).wBitsPerSample);
+        println!("AvgBytesPerSec: {:?}",   deref!(sound_data.audio_prefs, WAVEFORMATEX).nAvgBytesPerSec);
+        println!("nBlockAlign: {:?}",     deref!(sound_data.audio_prefs, WAVEFORMATEX).nBlockAlign);
+        println!("cbSize: {:?}",          deref!(sound_data.audio_prefs, WAVEFORMATEX).cbSize);
+        */
 
 
-    panic!("EXIT");
+        let hnsActualDuration = REFTIMES_PER_SEC as u64 *
+                         buffersize as u64 / deref!(sound_data.audio_prefs, WAVEFORMATEX).nSamplesPerSec as u64;
+        //println!("Actual Duration: {}", hnsActualDuration);
+
+
+
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).Start();
+        assert!(hr==0,"could not start audio client {}", hr);
+        {
+            //Currently we wait about a half a sec to get new data
+            std::thread::sleep(time::Duration::from_millis(hnsActualDuration/REFTIMES_PER_MILLISEC/10));
+
+
+            let mut packetLength = 0u32;
+            let hr = deref!(sound_data.captureclient_ptr, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
+            assert!(hr==0,"GetNextPacket size run: {}\n Next Packet size {}", hr, packetLength); 
+
+            while packetLength != 0
+            {
+                let mut pData : *mut u8 = null_mut();
+                let mut numFramesAvailable = 0u32;
+                let mut flags = 0u32;
+                // Get the available data in the shared buffer.
+                let hr = deref!(sound_data.captureclient_ptr, IAudioCaptureClient).GetBuffer(
+                                       &mut pData as *mut _,
+                                       &mut numFramesAvailable as *mut _,
+                                       &mut flags as *mut _, null_mut(), null_mut());
+                assert!(hr == 0, "AudioCaptureClient GetBuffer goes not work: {}.", hr);
+
+                //Prob wrong
+                if (flags & AUDCLNT_BUFFERFLAGS_SILENT == 1)
+                {
+                    pData = null_mut();  // Tell CopyData to write silence.
+                } else {
+                    
+                    //NOTE
+                    //Audio is in 32 bit chuncks as specified by the waveformatex
+                    //Additionally waveformatex specifies nchannels == 2
+                    let slice = std::slice::from_raw_parts_mut(pData as *mut f32, (numFramesAvailable * 2) as usize);
+                    { //Storing sound data
+
+                        let buffer_size = (numFramesAvailable * 2 ) as usize;
+                        let record_buffer_size  = sound_data.recorded_buffer.len();
+                        let recorded_buffer_ptr = sound_data.recorded_buffer.as_mut_ptr();
+
+                        std::ptr::copy(recorded_buffer_ptr.offset(buffer_size as isize), 
+                                       recorded_buffer_ptr, record_buffer_size - buffer_size);
+
+                        std::ptr::copy_nonoverlapping(pData as *mut f32, 
+                                  recorded_buffer_ptr.offset((record_buffer_size - buffer_size) as isize), 
+                                  buffer_size);
+                        sound_data.to_be_filled -= buffer_size as isize;
+                    }
+                }
+
+                let hr = deref!(sound_data.captureclient_ptr, IAudioCaptureClient).ReleaseBuffer(numFramesAvailable);
+                assert!(hr==0,"ReleaseBuffer {}", hr);
+
+
+                let hr = deref!(sound_data.captureclient_ptr, IAudioCaptureClient).GetNextPacketSize(&mut packetLength as *mut _);
+                assert!(hr==0, "Get NextPacketSize {}", hr);
+
+                if sound_data.to_be_filled <= 0 {
+                    sound_data.record_on = false;
+                    
+                    //Add the result to our tapedeck
+                    let mut tape_name = sound_data.textbox.text_buffer.clone();
+
+                    let mut is_substring_count = 0;
+                    for i in 0..sound_data.tape_deck.len(){
+                        if sound_data.tape_deck.keys[i].contains(&tape_name) {
+                            is_substring_count += 1;
+                        }
+                    }
+
+
+
+                    if is_substring_count > 0 {
+                        tape_name += &format!("_{}", is_substring_count);
+                    }
+                   
+                    let mut tape = CassetteTape::new();
+                    tape.begin_marker = sound_data.button_press_marker;
+                    tape.data =  sound_data.recorded_buffer.clone();
+
+                    sound_data.tape_deck.insert_or_set(tape_name, tape);
+                    break;
+                }
+            }
+        }
+        let hr = deref!(sound_data.audioclient_ptr, IAudioClient).Stop();
+        assert!(hr==0,"stop recording audio {}", hr);
+
+        if sound_data.record_on == false{
+            println!("Reset testing");
+            let hr = deref!(sound_data.audioclient_ptr, IAudioClient).Reset();
+            assert!(hr==0,"Reset recording audio {}", hr);
+        }
+    }
+    { //Draw recording
+        let fw = 0.4;
+        let fh = 0.4;
+        let offset_x =  (GLOBAL_BACKBUFFER.w as f32 * (1.0-fw-0.03)) as i32;
+        let offset_y =  (GLOBAL_BACKBUFFER.h as f32 * fh) as i32; 
+        let w        =  (GLOBAL_BACKBUFFER.w as f32 * fw) as i32;
+        let h        =  (GLOBAL_BACKBUFFER.h as f32 * fh) as i32; 
+
+        drawRect(&mut GLOBAL_BACKBUFFER, [offset_x, offset_y, w, h], C4_GREY, true);
+
+
+        let mut _i = 0;
+        for i in 0..sound_data.recorded_buffer.len(){
+            if i % 1000 != 0 { continue; }
+            _i +=1;
+            let x = (_i) as i32 + offset_x;
+            let hf32 = h as f32;
+            let y = (sound_data.recorded_buffer[i] * hf32 + 0.5*hf32) as i32 + offset_y;
+            let w = 1;
+            let h = 1;
+            drawRect(&mut GLOBAL_BACKBUFFER, [x, y, w, h], C4_BLUE, true);
+        }
+
+        //Draw marker is set
+
+        //TODO 
+        //make this nice
+        let x = (sound_data.button_press_marker/2000*2) as i32 + offset_x;
+        //println!("{}", x);
+        let y = offset_y - h/2;
+        drawRect(&mut GLOBAL_BACKBUFFER, [x, offset_y, 2, h], C4_RED, true);
+    }
+
     return 0;
 }}
 
@@ -2802,11 +3236,13 @@ fn app_screencapture(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
                //screen shot is changed
 
                let n_shots_to_capture = app_data.number_of_shots_to_take_textbox.text_buffer.parse::<i32>().expect("Number of screenshots to be taken is not a i32");
+               let file_name = app_data.image_prepend_name_textbox.text_buffer.clone() + &format!("_{}", app_data.image_counter);
                let mut arr = screen_shot(app_data.handle_dc.as_ref().expect("App data dc could not be taken as a reference."), n_shots_to_capture,
-                                         &app_data.image_prepend_name_textbox.text_buffer,
+                                         &file_name,
                                          &app_data.root_folder_textbox.text_buffer, true);
                app_data.screenshot_buffer.append(&mut arr);
                app_data.currently_rendering_index = app_data.screenshot_buffer.len() - 1;
+               app_data.image_counter += 1;
         }
 
 
