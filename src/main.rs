@@ -51,6 +51,7 @@ const C4_BLUE   :[f32;4] = [0.0, 0.0, 1.0, 1.0];
 const C4_BLACK  :[f32;4] = [0.0, 0.0, 0.0, 1.0];
 const C4_GREY   :[f32;4] = [0.1, 0.1, 0.1, 1.0];
 const C4_RED    :[f32;4] = [1.0, 0.0, 0.0, 1.0];
+const C4_GREEN  :[f32;4] = [0.0, 1.0, 0.0, 1.0];
 
 /*
 100 images per run
@@ -164,6 +165,10 @@ use std::fs::File;
        pub file_header:        TGBitmapFileHeader,
        pub info_header:        TGBitmapHeaderInfo,
        pub rgba:               Vec<u8>,
+
+      //For ease of use
+       pub width  : i32,
+       pub height : i32,
     }
 
     pub fn loadBMP(filename: &str)->TGBitmap{unsafe{
@@ -196,6 +201,8 @@ use std::fs::File;
 
         let buffer = img_buffer[rt.file_header.off_bits as usize ..].to_vec();
         rt.rgba = buffer;
+        rt.width =  rt.info_header.width; 
+        rt.height =  rt.info_header.height; 
 
         return rt;
     }}
@@ -224,6 +231,8 @@ use std::fs::File;
                         colors_important:   0,
                 },
                 rgba: vec![0;4 * (w*h) as usize],
+                width  : w,
+                height : h,
             }
 
         }
@@ -684,7 +693,7 @@ fn screen_shot(handle_dc: &WindowHandleDC, number_of_shots: i32, file_prepend: &
             colors_important:   0,
         };
 
-        rt.push(TGBitmap{file_header: header, info_header: info, rgba: pixels});
+        rt.push(TGBitmap{file_header: header, info_header: info, rgba: pixels, width: bitmap.bmWidth, height: bitmap.bmHeight});
 
     }
     if save_files{for (i, it) in rt.iter().enumerate(){
@@ -904,7 +913,7 @@ fn make_window(){unsafe{
 
                         if message.message == winapi::um::winuser::WM_LBUTTONDOWN{ mouseinfo.lbutton = ButtonStatus::Down; }
                         else if message.message == winapi::um::winuser::WM_LBUTTONUP{ mouseinfo.lbutton = ButtonStatus::Up; }
-                        else { mouseinfo.lbutton = ButtonStatus::Default; }
+                        //else { mouseinfo.lbutton = ButtonStatus::Default; }//Not sure what this fixed but keep an eye on this
 
                         //Mouse Wheel stuffs
                         if message.message == winapi::um::winuser::WM_MOUSEWHEEL{
@@ -1515,7 +1524,7 @@ impl CassetteTape{
 
         let data_len = self.data.len();
         let data = &self.data[0] as *const f32 as *const u8;
-        let _data = unsafe{ std::slice::from_raw_parts(data, data_len) };
+        let _data = unsafe{ std::slice::from_raw_parts(data, data_len*4) };
         filebuffer.write( _data );
         
     }
@@ -1567,12 +1576,82 @@ impl SoundAppData{
 }
 
 
+#[derive(Debug)]
+struct ColorVector{
+    r : f32,
+    g : f32,
+    b : f32,
+
+    avg_intensity : f32,
+    count         : i32,
+}
+
+impl ColorVector{
+    fn init(r: u8, g: u8, b: u8)->ColorVector{
+        let _r = r as f32;
+        let _g = g as f32;
+        let _b = b as f32;
+        let intensity = (_r.powf(2.0) + _g.powf(2.0) + _b.powf(2.0)).powf(0.5) + 0.001;
+        ColorVector{
+            r : _r / intensity, 
+            g : _g / intensity, 
+            b : _b / intensity, 
+
+            avg_intensity : intensity, 
+            count : 1,
+        }
+    }
+    fn rgba(&self)->[f32;4]{
+        [self.r, self.g, self.b, 1.0]
+    }
+}
+
+
+struct ColorVecAppData{
+    init    : bool,
+
+    bmp      : TGBitmap,
+    small_bmp: TGBitmap,
+    alt_bmp  : TGBitmap,
+
+    fix_color_vectors : bool,
+  
+    color_vector_set: Vec::<ColorVector>,
+    ch1_color_vector_set: Vec::<ColorVector>,
+    ch2_color_vector_set: Vec::<ColorVector>,
+
+    filename_textbox: TextBox,
+    old_filename: String,
+
+}
+
+impl ColorVecAppData{
+    pub fn new()->ColorVecAppData{
+        ColorVecAppData{
+            init : false,
+            bmp  : TGBitmap::new(0,0),
+            small_bmp  : TGBitmap::new(0,0),
+            alt_bmp  : TGBitmap::new(0,0),
+            fix_color_vectors : false,
+            color_vector_set :  Vec::with_capacity(100),
+            ch1_color_vector_set :  Vec::with_capacity(100),
+            ch2_color_vector_set :  Vec::with_capacity(100),
+
+            filename_textbox: TextBox::new(),
+            old_filename: String::new(),
+        }
+    }
+}
+
+
+
 
 enum MenuEnum{
     screenshot,
     ai,
     rect,
     sound,
+    colorvec,
 }
 
 struct MenuData{
@@ -1636,6 +1715,7 @@ struct AppData{
     ai_data: AiAppData,
     rect_data: RectangleAppData,
     sound_data: SoundAppData,
+    colorvec_data: ColorVecAppData,
 
     handle_dc: Option<WindowHandleDC>,
 }
@@ -1658,7 +1738,7 @@ impl AppData{
 
 
         AppData{
-            current_app: MenuEnum::rect,
+            current_app: MenuEnum::colorvec,
             global_menu_data: MenuData::new(),
 
             capture_exe_textbox: capture_exe_textbox,
@@ -1703,6 +1783,8 @@ impl AppData{
             rect_data: RectangleAppData::new(),
 
             sound_data: SoundAppData::new(),
+
+            colorvec_data: ColorVecAppData::new(),
 
             handle_dc: None,
         }
@@ -1782,9 +1864,594 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &
         MenuEnum::sound => {
             return app_sound(app_data, keyboardinfo, joystickinfo, textinfo, mouseinfo, frames, time_instance, window_handle);
         }
+        MenuEnum::colorvec => {
+            return app_colorvec(app_data, keyboardinfo, joystickinfo, textinfo, mouseinfo, frames, time_instance, window_handle);
+        }
     }
     return 0;
 }
+
+#[derive(Clone, Debug)]
+struct DbscanPt {
+    index: usize,
+    class: i8,
+}
+fn dbscan(set_vec: &mut Vec<DbscanPt>, eps: usize, min_pts: usize)->i8{
+    fn rangeQuery(set_vec: &mut Vec<DbscanPt>, pt: usize, eps: usize)->Vec<usize>{
+        let mut n = Vec::new();
+        for (i, it) in set_vec.iter().enumerate(){
+            if it.index == pt { continue; }
+            if (it.index as isize - pt as isize).abs() <= eps as isize{
+                n.push((i).clone());
+            }
+        }
+        return n;
+    }
+    //0 == Noise
+    //-1== None
+
+    let mut class : i8 = 0;
+    for i in 0..set_vec.len(){
+        if set_vec[i].class != -1{
+            continue;
+        } 
+        let index = set_vec[i].index;
+        let mut neighbor_set = rangeQuery(set_vec, index, eps);
+        if neighbor_set.len() < min_pts{
+            set_vec[i].class = 0;
+            continue;
+        }
+        
+        class += 1;
+        set_vec[i].class = class;
+        let mut j = 0;
+        while j < neighbor_set.len(){
+            if set_vec[neighbor_set[j]].class == 0 {set_vec[neighbor_set[j]].class = class;}
+            if set_vec[neighbor_set[j]].class != -1 { j+=1; continue;}
+            set_vec[neighbor_set[j]].class = class;
+
+            let _index = set_vec[neighbor_set[j]].index;
+            let mut _n_set = rangeQuery(set_vec, _index, eps);
+            if _n_set.len() >= min_pts{
+
+                for _i in 0.._n_set.len(){
+                    let mut in_set = false;
+                    for _j in 0..neighbor_set.len(){
+                        if _n_set[_i] == neighbor_set[_j]{
+                            in_set = true;
+                            break;
+                        }
+                    }
+                    if !in_set{
+                        neighbor_set.push(_n_set[_i].clone());
+                    }
+                }
+            }
+            j +=1;
+        }
+    }
+    return class;
+}
+fn get_min_index( set: &Vec<DbscanPt>, class: i8)->usize{ //NOTE lets assume things are ordered
+    //TODO
+    //maybe return a option
+    for it in set.iter(){
+        if it.class == class{
+            return it.index; 
+        }
+    }
+    return std::usize::MAX;
+}
+fn get_max_index( set: &Vec<DbscanPt>, class: i8)->usize{ //NOTE lets assume things are ordered
+    //TODO
+    //maybe return a option
+    let mut index = 0;
+    for it in set.iter(){
+        if it.class == class{
+            if index < it.index{
+               index = it.index; 
+            }
+        }
+    }
+    return index;
+}
+
+fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo,
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration, window_handle: HWND)->i32{unsafe{
+    let mut colorvec_data = &mut app_data.colorvec_data;
+    
+    if !colorvec_data.init {
+        
+        colorvec_data.filename_textbox.text_buffer = "training_testing_data/char_pos_melty/melty_blood_mid_k_1.bmp".to_string();
+        colorvec_data.filename_textbox.x = 400;
+        colorvec_data.filename_textbox.y = 10;
+        colorvec_data.filename_textbox.text_size = 24.0;
+        colorvec_data.filename_textbox.max_char = 80;
+        colorvec_data.filename_textbox.max_render_length = 500;
+        
+        colorvec_data.old_filename = colorvec_data.filename_textbox.text_buffer.clone();
+
+        //Load bmp
+        colorvec_data.bmp = loadBMP(&colorvec_data.filename_textbox.text_buffer);
+        colorvec_data.small_bmp = resizeBMP(&colorvec_data.bmp, 400, 250 );
+        colorvec_data.fix_color_vectors = false;
+
+        colorvec_data.init = true; 
+    }
+
+    
+    colorvec_data.filename_textbox.update(keyboardinfo, textinfo, mouseinfo);
+    colorvec_data.filename_textbox.draw(time_instance.subsec_nanos() as f32);
+    if colorvec_data.filename_textbox.text_buffer != colorvec_data.old_filename{
+
+        let _path = colorvec_data.filename_textbox.text_buffer.clone();
+        let mut _path = std::path::Path::new(&_path);
+        if _path.exists() && 
+           _path.is_file(){
+            colorvec_data.old_filename = colorvec_data.filename_textbox.text_buffer.clone();
+            colorvec_data.bmp = loadBMP(&colorvec_data.filename_textbox.text_buffer);
+            colorvec_data.small_bmp = resizeBMP(&colorvec_data.bmp, 400, 250 );
+        }
+    }
+
+
+    
+    //determine list of color vectors
+    //NOTE
+    //this struct is used to make iteration easier.
+    struct RGBA {
+        b: u8,
+        g: u8,
+        r: u8,
+        a: u8 
+    }
+    let size  = (colorvec_data.bmp.width * colorvec_data.bmp.height) as usize;
+    let ptr   = colorvec_data.bmp.rgba.as_ptr() as *const RGBA; 
+    let slice = std::slice::from_raw_parts(ptr, size);
+
+
+
+    let mut color_vector_set = &mut colorvec_data.color_vector_set; 
+    let mut ch1_color_vector_set = &mut colorvec_data.ch1_color_vector_set; 
+    let mut ch2_color_vector_set = &mut colorvec_data.ch2_color_vector_set; 
+    let cut_dr = 0.1;
+
+
+    let timer = std::time::Instant::now(); 
+
+    let height = colorvec_data.bmp.height;
+    let width = colorvec_data.bmp.width;
+    //for i in 0..height as usize {
+    //    for j in 0..width as usize {
+    //        let c = &slice[ j*height as usize + i];
+    //        let c_v = ColorVector::init(c.r, c.g, c.b);
+
+    //        let mut in_set = false; 
+    //        let mut in_index = 0;
+    //        for (_i,it) in color_vector_set.iter().enumerate(){
+    //            let dr = ((c_v.r - it.r).powf(2.0) + 
+    //                      (c_v.g - it.g).powf(2.0) + 
+    //                      (c_v.b - it.b).powf(2.0)).powf(0.5);
+  
+    //            if dr < cut_dr { 
+    //                in_set   = true; 
+    //                in_index = _i; 
+    //                break; 
+    //            }
+    //        }
+    //        if !in_set { color_vector_set.push(c_v); } 
+    //        else {  
+    //            let intensity = color_vector_set[in_index].avg_intensity * color_vector_set[in_index].count as f32;
+    //            color_vector_set[in_index].count += 1;  
+    //            color_vector_set[in_index].avg_intensity = ( intensity + c_v.avg_intensity ) / color_vector_set[in_index].count as f32;
+    //        }
+    //    }
+    //}
+    let elapsed = timer.elapsed(); 
+
+    let timer  = std::time::Instant::now(); 
+    {//Sub frame analysis
+        fn update_color_vector_set( rect: [usize;4], slice: &[RGBA], width: i32, height: i32, color_vector_set: &mut Vec<ColorVector>, cut_dr: f32){
+            let x1  = rect[0];
+            let y1  = rect[1];
+            let x2  = rect[0] + rect[2];
+            let y2  = rect[1] + rect[3];
+            for i in x1..x2 as usize {
+              for j in y1..y2 as usize {
+                    let c = &slice[ j*width as usize + i];
+                    let c_v = ColorVector::init(c.r, c.g, c.b);
+
+                    let mut in_set = false; 
+                    let mut in_index = 0;
+                    for (_i,it) in color_vector_set.iter().enumerate(){
+                        let dr = ((c_v.r - it.r).powf(2.0) + 
+                                  (c_v.g - it.g).powf(2.0) + 
+                                  (c_v.b - it.b).powf(2.0)).powf(0.5);
+          
+                        if dr < cut_dr { 
+                            in_set   = true; 
+                            in_index = _i; 
+                            break; 
+                        }
+                    }
+                    if !in_set { color_vector_set.push(c_v); } 
+                    else {  
+                        let intensity = color_vector_set[in_index].avg_intensity * color_vector_set[in_index].count as f32;
+                        color_vector_set[in_index].count += 1;  
+                        color_vector_set[in_index].avg_intensity = ( intensity + c_v.avg_intensity ) / color_vector_set[in_index].count as f32;
+                    }
+                }
+            }
+        }
+
+        if colorvec_data.fix_color_vectors == false {
+            //TODO 
+            //temp numbers; these hard coded numbers are all bad
+            {//Estimated background region 
+             //NOTE: I have not checked the accuracy of these regions 
+                update_color_vector_set( [200, 100, 3*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
+                update_color_vector_set( [900, 100, 3*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
+                update_color_vector_set( [640, 100, 1*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
+            }
+
+            {//Estimated character regions
+             //NOTE: I have not checked the accuracy of these regions 
+                update_color_vector_set( [6*73,  80, 2*85, 3*100], slice, width, height, &mut ch1_color_vector_set, cut_dr);
+                update_color_vector_set( [10*76, 80, 2*85, 3*100], slice, width, height, &mut ch2_color_vector_set, cut_dr);
+            }
+        }
+
+    }
+    let elapsed2 = timer.elapsed(); 
+
+
+
+    fn deltaR( c1: &ColorVector, c2: &ColorVector)->f32{
+        let dr = ((c1.r - c2.r).powf(2.0) + 
+                  (c1.g - c2.g).powf(2.0) + 
+                  (c1.b - c2.b).powf(2.0)).powf(0.5);
+        
+        return dr;
+    }
+
+    {//Remove background vectors from signal sample
+
+
+        let mut n_removed = 0;
+        let mut retain_indices = Vec::with_capacity(ch1_color_vector_set.len());
+
+        //NOTE This is not that good....
+        for jt in ch1_color_vector_set.iter(){
+            let mut color_good = true;
+            for it in color_vector_set.iter(){
+                //TODO
+                //The cull needs tobe done on percentages because image size can change
+                if deltaR(it, jt) < 0.05 && it.count > 200 { color_good = false; } 
+            }
+            retain_indices.push(color_good);  
+            if !color_good { n_removed += 1; }
+        }
+        let mut i=0 ;
+        ch1_color_vector_set.retain(|_| (retain_indices[i], i+=1).0);
+
+
+
+        let mut retain_indices = Vec::with_capacity(ch1_color_vector_set.len());
+        //NOTE This is not that good....
+        for jt in ch2_color_vector_set.iter(){
+            let mut color_good = true;
+            for it in color_vector_set.iter(){
+                //TODO
+                //The cull needs tobe done on percentages because image size can change
+                if deltaR(it, jt) < 0.05 && it.count > 200 { color_good = false; } 
+            }
+            retain_indices.push(color_good);  
+            if !color_good { n_removed += 1; }
+        }
+        let mut i=0 ;
+        ch2_color_vector_set.retain(|_| (retain_indices[i], i+=1).0);
+    }
+
+
+
+     
+    drawString( &mut GLOBAL_BACKBUFFER, &format!("total bkg vectors: {}  ch1 vectors: {}   ch2 vectors: {}", 
+                                                  color_vector_set.len(), ch1_color_vector_set.len(), ch2_color_vector_set.len()), 
+                500, 475, C4_WHITE, 18.0);
+    drawString( &mut GLOBAL_BACKBUFFER, &format!("sub Frame Timer: {:?}   w: {}  h: {}", 
+                                                  elapsed2, 5*80, 80), 
+                500, 475-18, C4_WHITE, 18.0);
+    color_vector_set.sort_by( |b, a| a.count.partial_cmp( &b.count ).unwrap() );
+
+    for (i, it) in color_vector_set.iter().enumerate() { 
+        if i > 20 { break; }
+        if i == 0 {drawString( &mut GLOBAL_BACKBUFFER, &format!("Background vectors:"), 30, 480 + 10, C4_WHITE, 14.0); }
+
+        drawRect(&mut GLOBAL_BACKBUFFER, [10, 475-10*(i-1) as i32, 20, 10], it.rgba(), true);
+        drawString( &mut GLOBAL_BACKBUFFER, &format!("count: {}    avg_intensity  {}", it.count, it.avg_intensity), 30, 480 - 10*i as i32, C4_WHITE, 14.0);
+    }
+    for (i, it) in ch1_color_vector_set.iter().enumerate() { 
+        if i > 20 { break; }
+        if i == 0 {drawString( &mut GLOBAL_BACKBUFFER, &format!("character 1 vectors:"), 30, 450 - 9*22, C4_WHITE, 14.0); }
+        drawRect(&mut GLOBAL_BACKBUFFER, [10, 450-10*(i+21) as i32, 20, 10], it.rgba(), true);
+        drawString( &mut GLOBAL_BACKBUFFER, &format!("count: {}", it.count), 30, 450 - 10*(i+22) as i32, C4_WHITE, 14.0);
+    }
+    for (i, it) in ch2_color_vector_set.iter().enumerate() { 
+        if i > 20 { break; }
+        if i == 0 {drawString( &mut GLOBAL_BACKBUFFER, &format!("character 2 vectors:"), 230, 450 - 9*22, C4_WHITE, 14.0); }
+        drawRect(&mut GLOBAL_BACKBUFFER, [200, 450-10*(i+21) as i32, 20, 10], it.rgba(), true);
+        drawString( &mut GLOBAL_BACKBUFFER, &format!("count: {}   avg_intensity  {}", it.count, it.avg_intensity), 230, 448 - 10*(i+22) as i32, C4_WHITE, 14.0);
+    }
+
+    
+
+
+    {//
+        let w_factor = colorvec_data.small_bmp.width as f32 / colorvec_data.bmp.width as f32;
+        let h_factor = colorvec_data.small_bmp.height as f32 / colorvec_data.bmp.height as f32;
+
+
+
+        let mut vertical_histogram_rm_bkg = vec![0; colorvec_data.small_bmp.width as usize];
+        let mut horizontal_histogram_rm_bkg = vec![0; colorvec_data.small_bmp.height as usize];
+
+        let mut vertical_histogram_rm_bkg_ch1 = vec![0; colorvec_data.small_bmp.width as usize];
+        let mut horizontal_histogram_rm_bkg_ch1 = vec![0; colorvec_data.small_bmp.height as usize];
+
+        let mut vertical_histogram_rm_bkg_ch2 = vec![0; colorvec_data.small_bmp.width as usize];
+        let mut horizontal_histogram_rm_bkg_ch2 = vec![0; colorvec_data.small_bmp.height as usize];
+        //Both background and foreground
+        if true { for i in 0..colorvec_data.small_bmp.width as usize {
+            for j in 0..colorvec_data.small_bmp.height as usize {
+                let index = 4*( i + j*colorvec_data.small_bmp.width as usize);
+                let r = colorvec_data.small_bmp.rgba[ index + 2];
+                let g = colorvec_data.small_bmp.rgba[ index + 1];
+                let b = colorvec_data.small_bmp.rgba[ index + 0];
+                let cv = ColorVector::init(r, g, b);
+
+                let mut is_ch1 = false;
+                let mut is_ch2 = false;
+
+                let mut is_good = false;
+
+                let mut max_count = 0;
+                for jt in ch1_color_vector_set.iter(){
+                    if deltaR(jt, &cv) < 0.1 {
+                        is_good = true;
+                        is_ch1 = true;
+                        if max_count < jt.count {
+                            max_count = jt.count;
+                        }
+                    }
+                }
+                for jt in ch2_color_vector_set.iter(){
+                    if deltaR(jt, &cv) < 0.1 {
+                        is_good = true;
+                        is_ch2 = true;
+                        if max_count < jt.count {
+                            max_count = jt.count;
+                        }
+                    }
+                }
+
+                let mut was_background = false;
+                for it in color_vector_set.iter(){
+                    let mut temp_is_good = is_good;
+                    if it.count > max_count{ temp_is_good = false; }
+                    if deltaR(it, &cv) < 0.1 && !temp_is_good{
+                        colorvec_data.small_bmp.rgba[ index + 0] = 0;
+                        colorvec_data.small_bmp.rgba[ index + 1] = 0;
+                        colorvec_data.small_bmp.rgba[ index + 2] = 0;
+                        was_background = true;
+                        break;
+                    }
+                }
+                if !was_background {
+                    vertical_histogram_rm_bkg[i] += 1;
+                    if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg[j] += 1; }
+
+                    if is_ch1 {
+                        vertical_histogram_rm_bkg_ch1[i] += 1;
+                        if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg_ch1[j] += 1; }
+                    }
+
+                    if is_ch2{
+                        vertical_histogram_rm_bkg_ch2[i] += 1;
+                        if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg_ch2[j] += 1; }
+                    }
+                }
+            }
+        }}
+
+        //Vertical and Horizontal histograms
+        drawRect(&mut GLOBAL_BACKBUFFER, [500, 140, colorvec_data.small_bmp.width, 50], C4_BLACK, true);
+        {//Vertical his draw
+            let mut mean = 0.0;
+            for it in vertical_histogram_rm_bkg.iter(){ 
+                mean += (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
+            }
+            mean /= vertical_histogram_rm_bkg.len() as f32;
+
+            let mut std = 0.0;
+            for it in vertical_histogram_rm_bkg.iter(){ 
+                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
+             }
+            std /= vertical_histogram_rm_bkg.len() as f32;
+
+
+            let mut dbscan_vec = Vec::new();
+
+            for (i, it) in vertical_histogram_rm_bkg.iter().enumerate(){
+                let _y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
+                let y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) as i32;
+                if _y_offset >  mean {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_GREEN, true);
+                    dbscan_vec.push(DbscanPt{index: i, class: -1});
+                }
+                else if _y_offset >  mean + std {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_RED, true);
+                }
+                else {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_WHITE, true);
+                }
+            }
+
+            let c = dbscan(&mut dbscan_vec, 8, 7);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_YELLOW, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_YELLOW, true);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_YELLOW, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_YELLOW, true);
+        } 
+        {//Vertical his draw
+            let mut mean = 0.0;
+            for it in vertical_histogram_rm_bkg_ch2.iter(){ 
+                mean += (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
+            }
+            mean /= vertical_histogram_rm_bkg_ch1.len() as f32;
+
+            let mut std = 0.0;
+            for it in vertical_histogram_rm_bkg_ch2.iter(){ 
+                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
+             }
+            std /= vertical_histogram_rm_bkg_ch2.len() as f32;
+
+
+            let mut dbscan_vec = Vec::new();
+
+            for (i, it) in vertical_histogram_rm_bkg_ch2.iter().enumerate(){
+                let _y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
+                let y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) as i32;
+                if _y_offset >  mean {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], [0.8, 0.1, 0.8, 0.5], true);
+                    dbscan_vec.push(DbscanPt{index: i, class: -1});
+                }
+                else if _y_offset >  mean + std {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_RED, true);
+                }
+                else {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_GREY, true);
+                }
+            }
+
+            let c = dbscan(&mut dbscan_vec, 8, 7);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_GREEN, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_GREEN, true);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_GREEN, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_GREEN, true);
+        } 
+        drawRect(&mut GLOBAL_BACKBUFFER, [440, 200, 50, colorvec_data.small_bmp.height], C4_BLACK, true);
+        {//Horizontal his draw
+            let mut mean = 0.0;
+            for it in horizontal_histogram_rm_bkg.iter(){ 
+                mean += (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
+            }
+            mean /= horizontal_histogram_rm_bkg.len() as f32;
+
+            let mut std = 0.0;
+            for it in horizontal_histogram_rm_bkg.iter(){ 
+                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
+             }
+            std /= horizontal_histogram_rm_bkg.len() as f32;
+
+            let mut dbscan_vec = Vec::new();
+            for (i, it) in horizontal_histogram_rm_bkg.iter().enumerate(){
+                let _x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
+                let x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0) as i32;
+
+                if _x_offset >  mean {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_GREEN, true);
+                    dbscan_vec.push(DbscanPt{index: i, class: -1});
+                }
+                else if _x_offset >  mean + std {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_RED, true);
+                }
+                else {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_WHITE, true);
+                }
+            }
+
+            let c = dbscan(&mut dbscan_vec, 8, 7);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 1) as i32, 50, 2], C4_YELLOW, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 1) as i32, 50, 2], C4_YELLOW, true);
+                                                                                             
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 2) as i32, 50, 2], C4_YELLOW, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 2) as i32, 50, 2], C4_YELLOW, true);
+        } 
+        {//Horizontal hist draw remove char 2?
+            let mut mean = 0.0;
+            for it in horizontal_histogram_rm_bkg_ch2.iter(){ 
+                mean += (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
+            }
+            mean /= horizontal_histogram_rm_bkg_ch2.len() as f32;
+
+            let mut std = 0.0;
+            for it in horizontal_histogram_rm_bkg_ch2.iter(){ 
+                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
+             }
+            std /= horizontal_histogram_rm_bkg_ch2.len() as f32;
+
+            let mut dbscan_vec = Vec::new();
+            for (i, it) in horizontal_histogram_rm_bkg_ch2.iter().enumerate(){
+                let _x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
+                let x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0) as i32;
+
+                if _x_offset >  mean {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], [0.8, 0.0, 0.8, 0.5], true);
+                    dbscan_vec.push(DbscanPt{index: i, class: -1});
+                }
+                else if _x_offset >  mean + std {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_RED, true);
+                }
+                else {
+                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_GREY, true);
+                }
+            }
+
+            let c = dbscan(&mut dbscan_vec, 8, 7);
+
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 1) as i32, 50, 2], C4_GREEN, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 1) as i32, 50, 2], C4_GREEN, true);
+                                                                                             
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 2) as i32, 50, 2], C4_GREEN, true);
+            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 2) as i32, 50, 2], C4_GREEN, true);
+        }
+    }
+
+
+
+    {//Toggle fixing color vector models.
+        if in_rect(mouseinfo.x, mouseinfo.y, [500, 100, 300, 30]){
+            drawRect(&mut GLOBAL_BACKBUFFER, [500, 100, 300, 30], C4_WHITE, false);
+            if mouseinfo.lbutton == ButtonStatus::Down && mouseinfo.old_lbutton == ButtonStatus::Up{
+                colorvec_data.fix_color_vectors = !colorvec_data.fix_color_vectors;
+            }
+        }
+
+        let offset_str  = drawString(&mut GLOBAL_BACKBUFFER, "Color Vector model is : ", 500, 100, C4_WHITE, 24.0 );
+        if colorvec_data.fix_color_vectors{
+            drawString(&mut GLOBAL_BACKBUFFER, "FIXED", 500+offset_str, 100, C4_WHITE, 24.0);
+
+        } else{
+            drawString(&mut GLOBAL_BACKBUFFER, "NOT-FIXED", 500+offset_str, 100, C4_WHITE, 24.0);
+
+            color_vector_set.clear();
+            ch1_color_vector_set.clear();
+            ch2_color_vector_set.clear();
+        }
+    }
+
+
+
+    drawBMP( &mut GLOBAL_BACKBUFFER, &mut colorvec_data.small_bmp, 500, 200, 1.0, None, None);
+    return 0;
+}}
+
+
 
 fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo,
     textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration, window_handle: HWND)->i32{unsafe{
@@ -1971,7 +2638,7 @@ fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: 
                                         sThumbRY: 0,
                                   }};
         let _temp = xinput::XInputGetState(0, &mut temp_xgamepad as *mut xinput::XINPUT_STATE);
-        if temp_xgamepad.Gamepad.wButtons != 0x00 {
+        if temp_xgamepad.Gamepad.wButtons != 0x00 || temp_xgamepad.Gamepad.bRightTrigger > 50{
             sound_data.button_press_marker = MAX_SOUND_DATA - sound_data.to_be_filled as usize;
         } 
     }
@@ -1998,7 +2665,7 @@ fn app_sound(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: 
                 if mouseinfo.lbutton == ButtonStatus::Down{
                     drawString(&mut GLOBAL_BACKBUFFER, "SAVE", x+length+offset+15, _y, C4_RED, 19.0);
                 }
-
+                
                 //SAVE DATA
                 if mouseinfo.lbutton == ButtonStatus::Up && mouseinfo.old_lbutton == ButtonStatus::Down{
                     //TODO set directory some other way
