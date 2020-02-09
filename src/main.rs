@@ -358,10 +358,17 @@ use std::fs::File;
             let bit_stride = (bmp.info_header.bit_per_pixel / 8) as i32;
 
             let color = bmp.rgba.as_ptr();
-            for i in (0..bmp.info_header.height).rev(){
-                //TODO
-                //when alpha is one copy the bmp bits instead of iterating through the array
-                if alpha < 0.99 {
+            if alpha >= 0.99 {
+                for i in (0..bmp.info_header.height).rev(){
+                    let _w = bmp.info_header.width as usize;
+                    let _off_src = i as isize * _w as isize * bit_stride as isize;
+                    let _off_dst = i as isize * gwidth as isize;
+                    std::ptr::copy::<u32>(color.offset(_off_src) as *const u32, buffer.offset( _off_dst + offset as isize), _w);
+                }
+            } else {
+                for i in (0..bmp.info_header.height).rev(){
+                    //TODO
+                    //when alpha is one copy the bmp bits instead of iterating through the array
                     for j in 0..bmp.info_header.width{
 
                         if (j + i*gwidth + offset) < 0 {continue;}
@@ -387,12 +394,6 @@ use std::fs::File;
 
                         *buffer.offset( (j + i*gwidth + offset) as isize) = 0x00000000 + (r_cmp << 16) + (g_cmp << 8) + b_cmp;
                     }
-                }
-                else{
-                    let _w = bmp.info_header.width as usize;
-                    let _off_src = i as isize * _w as isize * bit_stride as isize;
-                    let _off_dst = i as isize * gwidth as isize;
-                    std::ptr::copy::<u32>(color.offset(_off_src) as *const u32, buffer.offset( _off_dst + offset as isize), _w);
                 }
             }
         }
@@ -450,18 +451,105 @@ use std::fs::File;
 
         //NOTE
         //If the character is invisible then don't render
+        
         if character as u8 > 0x20{   //render char_buffer to main_buffer
             let buffer = canvas.buffer as *mut u32;
             let gwidth = canvas.w as usize;
             let gheight = canvas.h as usize;
             let offset = (x as usize + y as usize * gwidth) as usize;
+
+            let instance = std::time::Instant::now(); 
+            let width_mod_4 = cwidth % 4;
             for i in 0..cheight{
+                if i + y as usize  > gheight {continue;}
+
+
+                ///////////////////////////
+                //SIMD stuff 
+                //TODO
+                //move this out of the loop
+                /* 
+                use std::arch::x86_64::*;
+                let simd_b = _mm_set1_ps( color[2] + 255.0);
+                let simd_g = _mm_set1_ps( color[1] + 255.0);
+                let simd_r = _mm_set1_ps( color[0] + 255.0);
+                let simd_a = _mm_set1_ps( color[3] );
+                let simd_one = _mm_set1_ps( 1.0 );
+
+                //TODO complete the mod
+                for j in 0..(cwidth-width_mod_4)/4{
+                    let simd_text = _mm_set_ps( char_buffer[j*4 + cwidth* (cheight - 1 - i) + 3] as f32 / 255.,
+                                                char_buffer[j*4 + cwidth* (cheight - 1 - i) + 2] as f32/ 255.,
+                                                char_buffer[j*4 + cwidth* (cheight - 1 - i) + 1] as f32/ 255.,
+                                                char_buffer[j*4 + cwidth* (cheight - 1 - i) + 0] as f32 / 255.
+                                              );
+                    
+
+                    let dst_rgb = buffer.offset( (j*4*4 + i*gwidth + offset) as isize);
+                    let mut simd_base_a = _mm_set_ps(
+                                                 *(dst_rgb as *const u8).offset(3) as f32,
+                                                 *(dst_rgb as *const u8).offset(3 + 4) as f32,
+                                                 *(dst_rgb as *const u8).offset(3 + 8) as f32,
+                                                 *(dst_rgb as *const u8).offset(3 + 12) as f32
+                                               );
+                    let mut simd_base_r = _mm_set_ps(
+                                                 *(dst_rgb as *const u8).offset(2) as f32,
+                                                 *(dst_rgb as *const u8).offset(2+4) as f32,
+                                                 *(dst_rgb as *const u8).offset(2+8) as f32,
+                                                 *(dst_rgb as *const u8).offset(2+12) as f32
+                                               );
+                    let mut simd_base_g = _mm_set_ps(
+                                                 *(dst_rgb as *const u8).offset(1+0) as f32,
+                                                 *(dst_rgb as *const u8).offset(1+4) as f32,
+                                                 *(dst_rgb as *const u8).offset(1+8) as f32,
+                                                 *(dst_rgb as *const u8).offset(1+12) as f32
+                                               );
+                    let mut simd_base_b = _mm_set_ps(
+                                                *(dst_rgb as *const u8).offset(0) as f32,
+                                                *(dst_rgb as *const u8).offset(0+4) as f32,
+                                                *(dst_rgb as *const u8).offset(0+8) as f32,
+                                                *(dst_rgb as *const u8).offset(0+12) as f32
+                                              );
+
+                    let text_m_a =  _mm_mul_ps(simd_text, simd_a);
+                    let temp = _mm_sub_ps(simd_one, text_m_a );
+
+                    let temp_r = _mm_mul_ps(text_m_a, simd_r);
+                    let temp_g = _mm_mul_ps(text_m_a, simd_g);
+                    let temp_b = _mm_mul_ps(text_m_a, simd_b);
+
+                    simd_base_r = _mm_add_ps(_mm_mul_ps(temp, simd_base_r), temp_r);  
+                    simd_base_g = _mm_add_ps(_mm_mul_ps(temp, simd_base_g), temp_g);  
+                    simd_base_b = _mm_add_ps(_mm_mul_ps(temp, simd_base_b), temp_b);
+
+
+                    let arr_r : [f32; 4]= std::mem::transmute(simd_base_r); 
+                    let arr_g : [f32; 4]= std::mem::transmute(simd_base_g); 
+                    let arr_b : [f32; 4]= std::mem::transmute(simd_base_b); 
+
+                    *(dst_rgb as *mut u8).offset(2)      = arr_r[3] as u8;
+                    *(dst_rgb as *mut u8).offset(2 + 4)  = arr_r[2] as u8;
+                    *(dst_rgb as *mut u8).offset(2 + 8)  = arr_r[1] as u8;
+                    *(dst_rgb as *mut u8).offset(2 + 12) = arr_r[0] as u8;
+
+                    *(dst_rgb as *mut u8).offset(1)      = arr_g[3] as u8;
+                    *(dst_rgb as *mut u8).offset(1 + 4)  = arr_g[2] as u8;
+                    *(dst_rgb as *mut u8).offset(1 + 8)  = arr_g[1] as u8;
+                    *(dst_rgb as *mut u8).offset(1 + 12) = arr_g[0] as u8;
+
+                    *(dst_rgb as *mut u8).offset(0)      = arr_b[3] as u8;
+                    *(dst_rgb as *mut u8).offset(0 + 4)  = arr_b[2] as u8;
+                    *(dst_rgb as *mut u8).offset(0 + 8)  = arr_b[1] as u8;
+                    *(dst_rgb as *mut u8).offset(0 + 12) = arr_b[0] as u8;
+                }
+                */ 
+                ///////////////////////////
+
                 for j in 0..cwidth{
 
                     if (j + i*gwidth + offset) > gwidth * gheight {continue;}
 
                     if j + x as usize  > gwidth {continue;}
-                    if i + y as usize  > gheight {continue;}
 
                     let text_alpha = char_buffer[j + cwidth * (cheight - 1 - i)] as f32;
                     let a = color[3];
@@ -515,7 +603,6 @@ use std::fs::File;
         let g = (color[1] * a * 255.0) as u32;
         let b = (color[2] * a * 255.0) as u32;
 
-        let mut fast_rgba_buffer = vec![0x00000000 + (r << 16) +  (g << 8)  + b; w as usize];
 
 
         let mut _continue = false;
@@ -524,32 +611,52 @@ use std::fs::File;
         }
         if _continue == false {return;}
 
-        for _j in y..y+h{
-            let j = _j as isize;
-            if a < 0.99 || filled == false{
-                for _i in x..x+w{
-                    let i = _i as isize;
-                    if i > c_w || j > c_h{
-                        continue;
+        if a >= 0.99 && filled == true{
+            let mut fast_rgba_buffer = vec![0x00000000 + (r << 16) +  (g << 8)  + b; w as usize];
+            for _j in y..y+h{
+                let j = _j as isize;
+                std::ptr::copy::<u32>(fast_rgba_buffer.as_ptr(), buffer.offset(c_w*j + x), w as usize);
+            }
+        }
+        else{
+            if filled == false {
+            //Loop for non filled rect
+                for _j in y..y+h{
+                    let j = _j as isize;
+                    for _i in x..x+w{
+                        let i = _i as isize;
+                        if i > c_w || j > c_h{
+                            continue;
+                        }
+                        let dst_rgb = buffer.offset( (i + c_w*j) as isize);
+                        let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - a)) as u32;
+                        let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - a)) as u32;
+                        let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - a)) as u32;
+
+                        if (_i - x) > 1 && (_i - x ) < w-2 &&
+                          (_j - y) > 1 && (_j - y ) < h-2{continue;}
+
+                        *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
+
                     }
-                    let dst_rgb = buffer.offset( (i + c_w*j) as isize);
-                    let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - a)) as u32;
-                    let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - a)) as u32;
-                    let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - a)) as u32;
+                }
+            } else {
+                for _j in y..y+h{
+                    let j = _j as isize;
 
-                    if filled == false{
-                         if (_i - x) > 1 && (_i - x ) < w-2 &&
-                            (_j - y) > 1 && (_j - y ) < h-2{continue;}
+                    for _i in x..x+w{
+                        let i = _i as isize;
+                        if i > c_w || j > c_h{
+                            continue;
+                        }
+                        let dst_rgb = buffer.offset( (i + c_w*j) as isize);
+                        let _r = (*(dst_rgb as *const u8).offset(2) as f32 * (1.0 - a)) as u32;
+                        let _g = (*(dst_rgb as *const u8).offset(1) as f32 * (1.0 - a)) as u32;
+                        let _b = (*(dst_rgb as *const u8).offset(0) as f32 * (1.0 - a)) as u32;
 
-                         *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
-
-                    } else {
                         *buffer.offset(i + c_w*j) = 0x00000000 + (r+_r << 16) +  (g+_g << 8)  + b+_b;
                     }
                 }
-            }
-            else {
-                std::ptr::copy::<u32>(fast_rgba_buffer.as_ptr(), buffer.offset(c_w*j + x), w as usize);
             }
         }
     }}
@@ -1153,7 +1260,7 @@ struct KeyboardInfo{
     status: Vec<ButtonStatus>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, PartialEq)]
 struct JoystickInfo{
     x : ButtonStatus,
     y : ButtonStatus,
@@ -1575,6 +1682,15 @@ impl SoundAppData{
     }
 }
 
+//determine list of color vectors
+//NOTE
+//this struct is used to make iteration easier.
+struct RGBA {
+    b: u8,
+    g: u8,
+    r: u8,
+    a: u8 
+}
 
 #[derive(Debug)]
 struct ColorVector{
@@ -1603,6 +1719,39 @@ impl ColorVector{
     }
     fn rgba(&self)->[f32;4]{
         [self.r, self.g, self.b, 1.0]
+    }
+}
+
+fn update_color_vector_set( rect: [usize;4], slice: &[RGBA], width: i32, height: i32, color_vector_set: &mut Vec<ColorVector>, cut_dr: f32){
+    let x1  = rect[0];
+    let y1  = rect[1];
+    let x2  = rect[0] + rect[2];
+    let y2  = rect[1] + rect[3];
+    for i in x1..x2 as usize {
+      for j in y1..y2 as usize {
+            let c = &slice[ j*width as usize + i];
+            let c_v = ColorVector::init(c.r, c.g, c.b);
+
+            let mut in_set = false; 
+            let mut in_index = 0;
+            for (_i,it) in color_vector_set.iter_mut().enumerate(){
+                let dr = ((c_v.r - it.r).powf(2.0) + 
+                          (c_v.g - it.g).powf(2.0) + 
+                          (c_v.b - it.b).powf(2.0)).powf(0.5);
+  
+                if dr < cut_dr { 
+                    in_set   = true; 
+                    in_index = _i; 
+                    break; 
+                }
+            }
+            if !in_set { color_vector_set.push(c_v); } 
+            else {  
+                let intensity = color_vector_set[in_index].avg_intensity * color_vector_set[in_index].count as f32;
+                color_vector_set[in_index].count += 1;  
+                color_vector_set[in_index].avg_intensity = ( intensity + c_v.avg_intensity ) / color_vector_set[in_index].count as f32;
+            }
+        }
     }
 }
 
@@ -1644,6 +1793,37 @@ impl ColorVecAppData{
 }
 
 
+struct JoystickHistory{
+    joystick: JoystickInfo,
+    timestamp: u128
+}
+
+struct GamepadHistory{
+    gamepad: xinput::XINPUT_STATE,
+    timestamp: u128
+}
+struct KeystrokeAppData{
+    init: bool,
+    joystick_history: Vec::<JoystickHistory>,
+    gamepad_history: Vec::<GamepadHistory>,
+    play_back_joystick : bool,
+    play_back_gamepad : bool,
+    
+}
+
+impl KeystrokeAppData{
+    fn new()->KeystrokeAppData{
+        KeystrokeAppData{
+            init: false,
+            joystick_history: Vec::new(),
+            gamepad_history: Vec::new(),
+            play_back_joystick : false,
+            play_back_gamepad : false,
+        }
+    }
+}
+
+
 
 
 enum MenuEnum{
@@ -1652,6 +1832,7 @@ enum MenuEnum{
     rect,
     sound,
     colorvec,
+    keystroke_rec_play,
 }
 
 struct MenuData{
@@ -1716,6 +1897,7 @@ struct AppData{
     rect_data: RectangleAppData,
     sound_data: SoundAppData,
     colorvec_data: ColorVecAppData,
+    keystroke_data: KeystrokeAppData,
 
     handle_dc: Option<WindowHandleDC>,
 }
@@ -1723,9 +1905,9 @@ impl AppData{
     pub fn new()->AppData{
         let mut capture_exe_textbox = TextBox::new();
         capture_exe_textbox.text_buffer = "Guilty Gear Xrd -REVELATOR-".to_string();
-        //capture_exe_textbox.text_buffer = "MELTY BLOOD Actress Again Current Code".to_string();
+        capture_exe_textbox.text_buffer = "MELTY BLOOD Actress Again Current Code".to_string();
         //capture_exe_textbox.text_buffer = "Skullgirls Encore".to_string();
-        capture_exe_textbox.text_buffer = "SSFIVAE".to_string();
+        //capture_exe_textbox.text_buffer = "SSFIVAE".to_string();
 
         let mut root_folder_textbox = TextBox::new();
         root_folder_textbox.text_buffer = "temp".to_string();
@@ -1738,7 +1920,7 @@ impl AppData{
 
 
         AppData{
-            current_app: MenuEnum::colorvec,
+            current_app: MenuEnum::keystroke_rec_play,
             global_menu_data: MenuData::new(),
 
             capture_exe_textbox: capture_exe_textbox,
@@ -1785,6 +1967,8 @@ impl AppData{
             sound_data: SoundAppData::new(),
 
             colorvec_data: ColorVecAppData::new(),
+
+            keystroke_data: KeystrokeAppData::new(),
 
             handle_dc: None,
         }
@@ -1867,9 +2051,322 @@ fn app_main(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &
         MenuEnum::colorvec => {
             return app_colorvec(app_data, keyboardinfo, joystickinfo, textinfo, mouseinfo, frames, time_instance, window_handle);
         }
+        MenuEnum::keystroke_rec_play => {
+            return app_keystroke_rec_play(app_data, keyboardinfo, joystickinfo, textinfo, mouseinfo, frames, time_instance, window_handle);
+        }
     }
     return 0;
 }
+
+
+fn convert_to_joystick(gamepad : &xinput::XINPUT_STATE)->JoystickInfo{
+    //gamepad.Gamepad.wButtons & 0x10
+    //gamepad.Gamepad.wButtons & 0x20
+    let x = (gamepad.Gamepad.wButtons & 0x4000) == 0x4000;
+    let y = (gamepad.Gamepad.wButtons & 0x8000) == 0x8000;
+    let a = (gamepad.Gamepad.wButtons & 0x1000) == 0x1000;
+    let b = (gamepad.Gamepad.wButtons & 0x2000) == 0x2000;
+    let rb = (gamepad.Gamepad.wButtons & 0x200) == 0x200;
+    let lb = (gamepad.Gamepad.wButtons & 0x100) == 0x100;
+
+    JoystickInfo{
+        x : if x { ButtonStatus::Down } else {ButtonStatus::Up},
+        y : if y { ButtonStatus::Down } else {ButtonStatus::Up},
+        a : if a { ButtonStatus::Down } else {ButtonStatus::Up},
+        b : if b { ButtonStatus::Down } else {ButtonStatus::Up},
+        lb : if lb { ButtonStatus::Down } else {ButtonStatus::Up},
+        rb : if rb { ButtonStatus::Down } else {ButtonStatus::Up},
+        lt : ButtonStatus::Up, //TODO
+        rt : ButtonStatus::Up, //TODO
+
+        axis_x: gamepad.Gamepad.sThumbLX as f32 / std::i16::MAX as f32, 
+        axis_y: gamepad.Gamepad.sThumbLY as f32 / std::i16::MAX as f32,
+    }
+}
+
+
+fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo, 
+    textinfo: &TextInfo, mouseinfo: &MouseInfo, frames: usize, time_instance: std::time::Duration, window_handle: HWND)->i32{unsafe{
+
+    drawRect(&mut GLOBAL_BACKBUFFER, [0, 0, GLOBAL_BACKBUFFER.w, GLOBAL_BACKBUFFER.h], [0.3, 0.1, 0.5, 1.0], true);
+    drawString(&mut GLOBAL_BACKBUFFER, "REC/PLAY Key Strokes", 370, 450, C4_WHITE, 36.0);
+
+    let keystroke_data = &mut app_data.keystroke_data;
+
+    if keystroke_data.init == false{
+        keystroke_data.init = true;
+
+
+        keystroke_data.joystick_history.push( JoystickHistory{ joystick: (*joystickinfo).clone(), timestamp: time_instance.as_millis() } );
+
+        let mut xgamepad = xinput::XINPUT_STATE{
+                                    dwPacketNumber: 0,
+                                    Gamepad: xinput::XINPUT_GAMEPAD{
+                                        wButtons: 0,
+                                        bLeftTrigger: 0,
+                                        bRightTrigger: 0,
+                                        sThumbLX: 0,
+                                        sThumbLY: 0,
+                                        sThumbRX: 0,
+                                        sThumbRY: 0,
+                                  }};
+        //TODO
+        //check this error state
+        let _temp = xinput::XInputGetState(0, &mut xgamepad as *mut xinput::XINPUT_STATE);
+        keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: xgamepad.clone(), timestamp: time_instance.as_millis() });
+
+        keystroke_data.play_back_joystick = false;
+        keystroke_data.play_back_gamepad = false;
+    }
+
+
+    if textinfo.character == ' '{
+        keystroke_data.play_back_joystick = !keystroke_data.play_back_joystick;
+    }
+
+    if textinfo.character == 'b'{
+        keystroke_data.play_back_gamepad = !keystroke_data.play_back_gamepad;
+        println!("play back gamepad");
+    }
+
+
+
+    macro_rules! get_downstatus{
+        ($x:tt, $y:tt, $z1:tt, $z2:tt) => { 
+            match $x.$y {
+                ButtonStatus::Down => { 
+                    drawString(&mut GLOBAL_BACKBUFFER, stringify!($y), $z1, $z2, C4_WHITE, 12.0);
+                    true 
+                },
+                ButtonStatus::Up   => { false },
+                _=>{ false },
+            }
+        }
+    }
+    { // Get multiinput controller things 
+        drawString(&mut GLOBAL_BACKBUFFER, "Joystick", 70, 445, C4_WHITE, 26.0);
+   
+        let index = keystroke_data.joystick_history.len() - 1;
+        if keystroke_data.joystick_history[index].joystick != *joystickinfo{
+            keystroke_data.joystick_history.push( JoystickHistory{ joystick: joystickinfo.clone(), timestamp: time_instance.as_millis() });
+        } 
+
+        let recent_input_window = 30;
+        let mut _i = 0;
+        for (i, it) in keystroke_data.joystick_history.iter().enumerate(){ 
+            if keystroke_data.joystick_history.len() - i > recent_input_window { continue; }
+
+            let y = 420 - _i as i32 *15;
+            _i += 1;
+
+            let _joystickinfo = &it.joystick;
+            let button_x_down = get_downstatus!(_joystickinfo, x, 5,  y);
+            let button_a_down = get_downstatus!(_joystickinfo, a, 25, y);
+            let button_b_down = get_downstatus!(_joystickinfo, b, 45, y);
+            let button_y_down = get_downstatus!(_joystickinfo, y, 65, y);
+            let button_rb_down = get_downstatus!(_joystickinfo, rb, 85, y);
+            let button_lb_down = get_downstatus!(_joystickinfo, lb, 105, y);
+            let button_rt_down = get_downstatus!(_joystickinfo, rt, 125, y);
+            let button_lt_down = get_downstatus!(_joystickinfo, lt, 145, y);
+
+            drawString(&mut GLOBAL_BACKBUFFER, &format!("millis {:?}", it.timestamp), 165, y, C4_WHITE, 12.0);
+        }
+    }
+
+
+    {//xinput
+        drawString(&mut GLOBAL_BACKBUFFER, "Gamepad", 300, 435, C4_WHITE, 26.0);
+        let mut xgamepad = xinput::XINPUT_STATE{
+                                    dwPacketNumber: 0,
+                                    Gamepad: xinput::XINPUT_GAMEPAD{
+                                        wButtons: 0,
+                                        bLeftTrigger: 0,
+                                        bRightTrigger: 0,
+                                        sThumbLX: 0,
+                                        sThumbLY: 0,
+                                        sThumbRX: 0,
+                                        sThumbRY: 0,
+                                  }};
+        let _temp = xinput::XInputGetState(0, &mut xgamepad as *mut xinput::XINPUT_STATE);
+        let index = keystroke_data.gamepad_history.len() - 1;
+
+        fn same_gamepad_state(gp1: &xinput::XINPUT_STATE, gp2: &xinput::XINPUT_STATE)->bool{
+            //if gp1.dwPacketNumber == gp2.dwPacketNumber &&
+            if     gp1.Gamepad.wButtons == gp2.Gamepad.wButtons 
+               && ((gp1.Gamepad.bRightTrigger ==  gp2.Gamepad.bRightTrigger) || (gp1.Gamepad.bRightTrigger < 40 && gp2.Gamepad.bRightTrigger < 40))
+               && ((gp1.Gamepad.bLeftTrigger ==  gp2.Gamepad.bLeftTrigger) || (gp1.Gamepad.bLeftTrigger < 40 && gp2.Gamepad.bLeftTrigger < 40))
+               && ((gp1.Gamepad.sThumbLX - gp2.Gamepad.sThumbLX).abs() < 500 || (gp1.Gamepad.sThumbLX.abs() < 7000 && gp2.Gamepad.sThumbLX.abs() < 7000))
+               && ((gp1.Gamepad.sThumbRX - gp2.Gamepad.sThumbRX).abs() < 500 || (gp1.Gamepad.sThumbRX.abs() < 7000 && gp2.Gamepad.sThumbRX.abs() < 7000))
+               && ((gp1.Gamepad.sThumbLY - gp2.Gamepad.sThumbLY).abs() < 500 || (gp1.Gamepad.sThumbLY.abs() < 7000 && gp2.Gamepad.sThumbLY.abs() < 7000))
+               && ((gp1.Gamepad.sThumbRY - gp2.Gamepad.sThumbRY).abs() < 500 || (gp1.Gamepad.sThumbRY.abs() < 7000 && gp2.Gamepad.sThumbRY.abs() < 7000))
+               {
+                    return true;
+               } else {
+                    return false;
+               }
+        } 
+
+        if !same_gamepad_state(& keystroke_data.gamepad_history[index].gamepad, &xgamepad){
+            keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: xgamepad.clone(), timestamp: time_instance.as_millis() });
+        } 
+
+        let recent_input_window = 30;
+        let mut _i = 0;
+        for (i, it) in keystroke_data.gamepad_history.iter().enumerate(){ 
+            if keystroke_data.gamepad_history.len() - i > recent_input_window { continue; }
+
+            let y = 420 - _i as i32 *15;
+            _i += 1;
+
+            let _joystickinfo = convert_to_joystick(&it.gamepad);
+            let button_x_down = get_downstatus!(_joystickinfo, x, 275,  y);
+            let button_a_down = get_downstatus!(_joystickinfo, a, 295, y);
+            let button_b_down = get_downstatus!(_joystickinfo, b, 325, y);
+            let button_y_down = get_downstatus!(_joystickinfo, y, 345, y);
+            let button_rb_down = get_downstatus!(_joystickinfo, rb, 365, y);
+            let button_lb_down = get_downstatus!(_joystickinfo, lb, 385, y);
+            let button_rt_down = get_downstatus!(_joystickinfo, rt, 405, y);
+            let button_lt_down = get_downstatus!(_joystickinfo, lt, 425, y);
+
+            drawString(&mut GLOBAL_BACKBUFFER, &format!("millis {:?}", it.timestamp), 445, y, C4_WHITE, 12.0);
+        }
+       
+
+        {//play recording
+         // Guilty Gear settings
+         // up   : w  0x57
+         // down : s  0x53
+         // left : a  0x41
+         // right: d  0x44
+
+         // p    : j : x    0x4A
+         // k    : i : y    0x49
+         // s    : u : a    0x55
+         // hs   : o : b    0x4F
+         // D    : l : rb   0x4C
+         // taunt: m
+
+         //TODO
+         //we should be finding out what has changed and sending that 
+
+ 
+            use winapi::um::winuser::*;
+
+            struct kb_input{ key: i32, 
+                             down_up: i32  //zero is down
+                           };
+            fn joystick_to_keyboard( joystick: &JoystickInfo)->Vec<kb_input>{
+                let mut rt = Vec::new();
+                if joystick.x == ButtonStatus::Down { rt.push(kb_input{key: 0x4A, down_up: 0}); }
+                else { rt.push(kb_input{key: 0x4A, down_up: 0x0002}); }
+
+                if joystick.y == ButtonStatus::Down { rt.push(kb_input{key: 0x49, down_up: 0}); }
+                else { rt.push(kb_input{key: 0x49, down_up: 0x0002}); }
+
+                if joystick.a == ButtonStatus::Down { rt.push(kb_input{key: 0x55, down_up: 0}); }
+                else { rt.push(kb_input{key: 0x55, down_up: 0x0002}); }
+
+                if joystick.b == ButtonStatus::Down { rt.push(kb_input{key: 0x4F, down_up: 0}); }
+                else { rt.push(kb_input{key: 0x4F, down_up: 0x0002}); }
+
+                if joystick.rb == ButtonStatus::Down { rt.push(kb_input{key: 0x4C, down_up: 0}); }
+                else { rt.push(kb_input{key: 0x4C, down_up: 0x0002}); }
+
+
+                if joystick.axis_x > 0.2 {
+                    rt.push(kb_input{key: 0x41 , down_up:0x0002}); 
+                    rt.push(kb_input{key: 0x44 , down_up:0x0}); 
+                }
+                else if joystick.axis_x < -0.2 {
+                    rt.push(kb_input{key: 0x41 , down_up:0x0}); 
+                    rt.push(kb_input{key: 0x44 , down_up:0x0002}); 
+                }
+                else {
+                    rt.push(kb_input{key: 0x41 , down_up:0x0002}); 
+                    rt.push(kb_input{key: 0x44 , down_up:0x0002}); 
+                }
+
+                if joystick.axis_y > 0.2 {
+                    rt.push(kb_input{key: 0x57 , down_up:0x0}); 
+                    rt.push(kb_input{key: 0x53 , down_up:0x0002}); 
+                }
+                else if joystick.axis_y < -0.2 {
+                    rt.push(kb_input{key: 0x57 , down_up:0x0002}); 
+                    rt.push(kb_input{key: 0x53 , down_up:0x0}); 
+                }
+                else {
+                    rt.push(kb_input{key: 0x57 , down_up:0x0002}); 
+                    rt.push(kb_input{key: 0x53 , down_up:0x0002}); 
+                }
+
+                return rt;
+            }
+
+
+            if keystroke_data.play_back_joystick {
+                for j in 0..keystroke_data.joystick_history.len()-1 {
+                    let jt = & keystroke_data.joystick_history[j];
+                    let jt_next = & keystroke_data.joystick_history[j+1];
+
+                    let kb_inputs = joystick_to_keyboard( & jt.joystick );
+                    let mut input_vec = Vec::new();
+
+                    for it in kb_inputs.iter(){
+                        let mut u = winapi::um::winuser::new_inputu();
+                        u.ki_mut().wVk = it.key as u16;
+                        u.ki_mut().dwFlags = it.down_up as u32;
+                        input_vec.push( INPUT{type_: 1, u: u }); 
+                    }
+
+                    let output = winapi::um::winuser::SendInput(input_vec.len() as u32, input_vec.as_mut_ptr() , std::mem::size_of::<INPUT>() as i32);
+                    let wait = std::time::Duration::from_millis((jt_next.timestamp - jt.timestamp) as u64); //TODO dangerous business
+                    sleep(wait);
+
+                }
+                keystroke_data.play_back_joystick = false;
+                println!("Playback");
+            }
+            if keystroke_data.play_back_gamepad {
+                for j in 0..keystroke_data.gamepad_history.len()-1 {
+                    let wait_duration =  keystroke_data.gamepad_history[j+1].timestamp - keystroke_data.gamepad_history[j].timestamp;
+
+                    let jt =  convert_to_joystick(&keystroke_data.gamepad_history[j].gamepad);
+                    let jt_next = convert_to_joystick(&keystroke_data.gamepad_history[j+1].gamepad);
+
+                    let kb_inputs = joystick_to_keyboard( &jt );
+                    let mut input_vec = Vec::new();
+
+                    for it in kb_inputs.iter(){
+                        let mut u = winapi::um::winuser::new_inputu();
+                        u.ki_mut().wVk = it.key as u16;
+                        u.ki_mut().dwFlags = it.down_up as u32;
+                        input_vec.push( INPUT{type_: 1, u: u }); 
+                    }
+
+                    let output = winapi::um::winuser::SendInput(input_vec.len() as u32, input_vec.as_mut_ptr() , std::mem::size_of::<INPUT>() as i32);
+                    let wait = std::time::Duration::from_millis( wait_duration as u64); //TODO dangerous business
+                    sleep(wait);
+
+                }
+                keystroke_data.play_back_gamepad = false;
+                println!("Playback gamepad");
+            }
+        }
+/*NOTE
+// alteration made to winuser.rs 
+
+//Thoth change to make life easier for me
+pub fn new_inputu()->INPUT_u{
+    return INPUT_u([0;4]);
+}
+
+*/
+    }
+
+
+    return 0;
+}}
+
 
 #[derive(Clone, Debug)]
 struct DbscanPt {
@@ -1962,7 +2459,8 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
     
     if !colorvec_data.init {
         
-        colorvec_data.filename_textbox.text_buffer = "training_testing_data/char_pos_melty/melty_blood_mid_k_1.bmp".to_string();
+        colorvec_data.filename_textbox.text_buffer = "training_testing_data/background_subtraction_set/gg_country_init_0_1.bmp".to_string();
+        //colorvec_data.filename_textbox.text_buffer = "training_testing_data/char_pos_melty/melty_blood_mid_k_1.bmp".to_string();
         colorvec_data.filename_textbox.x = 400;
         colorvec_data.filename_textbox.y = 10;
         colorvec_data.filename_textbox.text_size = 24.0;
@@ -1996,15 +2494,6 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
 
 
     
-    //determine list of color vectors
-    //NOTE
-    //this struct is used to make iteration easier.
-    struct RGBA {
-        b: u8,
-        g: u8,
-        r: u8,
-        a: u8 
-    }
     let size  = (colorvec_data.bmp.width * colorvec_data.bmp.height) as usize;
     let ptr   = colorvec_data.bmp.rgba.as_ptr() as *const RGBA; 
     let slice = std::slice::from_raw_parts(ptr, size);
@@ -2021,83 +2510,40 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
 
     let height = colorvec_data.bmp.height;
     let width = colorvec_data.bmp.width;
-    //for i in 0..height as usize {
-    //    for j in 0..width as usize {
-    //        let c = &slice[ j*height as usize + i];
-    //        let c_v = ColorVector::init(c.r, c.g, c.b);
 
-    //        let mut in_set = false; 
-    //        let mut in_index = 0;
-    //        for (_i,it) in color_vector_set.iter().enumerate(){
-    //            let dr = ((c_v.r - it.r).powf(2.0) + 
-    //                      (c_v.g - it.g).powf(2.0) + 
-    //                      (c_v.b - it.b).powf(2.0)).powf(0.5);
-  
-    //            if dr < cut_dr { 
-    //                in_set   = true; 
-    //                in_index = _i; 
-    //                break; 
-    //            }
-    //        }
-    //        if !in_set { color_vector_set.push(c_v); } 
-    //        else {  
-    //            let intensity = color_vector_set[in_index].avg_intensity * color_vector_set[in_index].count as f32;
-    //            color_vector_set[in_index].count += 1;  
-    //            color_vector_set[in_index].avg_intensity = ( intensity + c_v.avg_intensity ) / color_vector_set[in_index].count as f32;
-    //        }
-    //    }
-    //}
+
+
     let elapsed = timer.elapsed(); 
 
     let timer  = std::time::Instant::now(); 
-    {//Sub frame analysis
-        fn update_color_vector_set( rect: [usize;4], slice: &[RGBA], width: i32, height: i32, color_vector_set: &mut Vec<ColorVector>, cut_dr: f32){
-            let x1  = rect[0];
-            let y1  = rect[1];
-            let x2  = rect[0] + rect[2];
-            let y2  = rect[1] + rect[3];
-            for i in x1..x2 as usize {
-              for j in y1..y2 as usize {
-                    let c = &slice[ j*width as usize + i];
-                    let c_v = ColorVector::init(c.r, c.g, c.b);
+    let bkg_1 = [20, 100, 200, 6*80];
+    let bkg_2 = [1000, 100, 200, 6*80];
+    let bkg_3 = [640, 100, 80, 6*80];
 
-                    let mut in_set = false; 
-                    let mut in_index = 0;
-                    for (_i,it) in color_vector_set.iter().enumerate(){
-                        let dr = ((c_v.r - it.r).powf(2.0) + 
-                                  (c_v.g - it.g).powf(2.0) + 
-                                  (c_v.b - it.b).powf(2.0)).powf(0.5);
-          
-                        if dr < cut_dr { 
-                            in_set   = true; 
-                            in_index = _i; 
-                            break; 
-                        }
-                    }
-                    if !in_set { color_vector_set.push(c_v); } 
-                    else {  
-                        let intensity = color_vector_set[in_index].avg_intensity * color_vector_set[in_index].count as f32;
-                        color_vector_set[in_index].count += 1;  
-                        color_vector_set[in_index].avg_intensity = ( intensity + c_v.avg_intensity ) / color_vector_set[in_index].count as f32;
-                    }
-                }
-            }
-        }
+    //MELTY BLOOD pos mid k positions
+    //let ch_1 = [6*73,  80, 2*85, 3*100];
+    //let ch_2 = [10*76, 80, 2*85, 3*100];
+
+    //GG
+    let ch_1 = [239, 39, 280, 477];
+    let ch_2 = [775, 39, 280, 477];
+
+    {//Sub frame analysis
 
         if colorvec_data.fix_color_vectors == false {
             //TODO 
             //temp numbers; these hard coded numbers are all bad
             {//Estimated background region 
              //NOTE: I have not checked the accuracy of these regions 
-                update_color_vector_set( [200, 100, 3*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
-                update_color_vector_set( [900, 100, 3*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
-                update_color_vector_set( [640, 100, 1*80, 6*80], slice, width, height, &mut color_vector_set, cut_dr);
+                update_color_vector_set( bkg_1, slice, width, height, &mut color_vector_set, cut_dr);
+                update_color_vector_set( bkg_2, slice, width, height, &mut color_vector_set, cut_dr);
+                update_color_vector_set( bkg_3, slice, width, height, &mut color_vector_set, cut_dr);
             }
 
             {//Estimated character regions
              //NOTE: I have not checked the accuracy of these regions 
-                update_color_vector_set( [6*73,  80, 2*85, 3*100], slice, width, height, &mut ch1_color_vector_set, cut_dr);
-                update_color_vector_set( [10*76, 80, 2*85, 3*100], slice, width, height, &mut ch2_color_vector_set, cut_dr);
+                update_color_vector_set( ch_1, slice, width, height, &mut ch1_color_vector_set, cut_dr);
+                update_color_vector_set( ch_2, slice, width, height, &mut ch2_color_vector_set, cut_dr);
             }
         }
 
@@ -2115,7 +2561,7 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
     }
 
     {//Remove background vectors from signal sample
-
+        let tot_bkg_pxs = (bkg_1[2]*bkg_1[3] + bkg_2[2]*bkg_2[3] + bkg_3[2]*bkg_3[3]) as i32;
 
         let mut n_removed = 0;
         let mut retain_indices = Vec::with_capacity(ch1_color_vector_set.len());
@@ -2126,7 +2572,11 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
             for it in color_vector_set.iter(){
                 //TODO
                 //The cull needs tobe done on percentages because image size can change
-                if deltaR(it, jt) < 0.05 && it.count > 200 { color_good = false; } 
+                if deltaR(it, jt) < 0.17 && it.count > 200
+                && (it.avg_intensity - jt.avg_intensity).abs() < 30.0 
+                { color_good = false; } 
+                if deltaR(it, jt) < 0.17 && it.count  > tot_bkg_pxs / 10 
+                { color_good = false; } 
             }
             retain_indices.push(color_good);  
             if !color_good { n_removed += 1; }
@@ -2143,13 +2593,18 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
             for it in color_vector_set.iter(){
                 //TODO
                 //The cull needs tobe done on percentages because image size can change
-                if deltaR(it, jt) < 0.05 && it.count > 200 { color_good = false; } 
+                if deltaR(it, jt) < 0.17 && it.count > 200
+                && (it.avg_intensity - jt.avg_intensity).abs() < 30.0 
+                { color_good = false; } 
+                if deltaR(it, jt) < 0.17 && it.count  > tot_bkg_pxs / 10
+                { color_good = false; } 
             }
             retain_indices.push(color_good);  
             if !color_good { n_removed += 1; }
         }
         let mut i=0 ;
         ch2_color_vector_set.retain(|_| (retain_indices[i], i+=1).0);
+
     }
 
 
@@ -2197,8 +2652,10 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
 
         let mut vertical_histogram_rm_bkg_ch1 = vec![0; colorvec_data.small_bmp.width as usize];
         let mut horizontal_histogram_rm_bkg_ch1 = vec![0; colorvec_data.small_bmp.height as usize];
+        let mut arr_horizontal_histogram_rm_bkg_ch1 = vec![vec![0; colorvec_data.small_bmp.height as usize]; 4];
 
         let mut vertical_histogram_rm_bkg_ch2 = vec![0; colorvec_data.small_bmp.width as usize];
+        let mut arr_horizontal_histogram_rm_bkg_ch2 = vec![vec![0; colorvec_data.small_bmp.height as usize]; 4];
         let mut horizontal_histogram_rm_bkg_ch2 = vec![0; colorvec_data.small_bmp.height as usize];
         //Both background and foreground
         if true { for i in 0..colorvec_data.small_bmp.width as usize {
@@ -2248,178 +2705,242 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
                 }
                 if !was_background {
                     vertical_histogram_rm_bkg[i] += 1;
-                    if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg[j] += 1; }
+                    horizontal_histogram_rm_bkg[j] += 1; 
 
                     if is_ch1 {
                         vertical_histogram_rm_bkg_ch1[i] += 1;
-                        if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg_ch1[j] += 1; }
+                        horizontal_histogram_rm_bkg_ch1[j] += 1;
+
+                        if i < colorvec_data.small_bmp.width as usize / 4{
+                            arr_horizontal_histogram_rm_bkg_ch1[0][j] += 1;
+                        } else if i < colorvec_data.small_bmp.width as usize / 2{
+                            arr_horizontal_histogram_rm_bkg_ch1[1][j] += 1;
+                        } else if i < colorvec_data.small_bmp.width as usize * 3 / 4 {
+                            arr_horizontal_histogram_rm_bkg_ch1[2][j] += 1;
+                        } else {
+                            arr_horizontal_histogram_rm_bkg_ch1[3][j] += 1;
+                        }
                     }
 
                     if is_ch2{
                         vertical_histogram_rm_bkg_ch2[i] += 1;
-                        if i > 100 && i < colorvec_data.small_bmp.width as usize - 100 { horizontal_histogram_rm_bkg_ch2[j] += 1; }
+
+                        if i < colorvec_data.small_bmp.width as usize / 4{
+                            arr_horizontal_histogram_rm_bkg_ch2[0][j] += 1;
+                        } else if i < colorvec_data.small_bmp.width as usize / 2{
+                            arr_horizontal_histogram_rm_bkg_ch2[1][j] += 1;
+                        } else if i < colorvec_data.small_bmp.width as usize * 3 / 4 {
+                            arr_horizontal_histogram_rm_bkg_ch2[2][j] += 1;
+                        } else {
+                            arr_horizontal_histogram_rm_bkg_ch2[3][j] += 1;
+                        }
+
+
+                        horizontal_histogram_rm_bkg_ch2[j] += 1;
                     }
                 }
             }
         }}
 
-        //Vertical and Horizontal histograms
-        drawRect(&mut GLOBAL_BACKBUFFER, [500, 140, colorvec_data.small_bmp.width, 50], C4_BLACK, true);
-        {//Vertical his draw
-            let mut mean = 0.0;
-            for it in vertical_histogram_rm_bkg.iter(){ 
-                mean += (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
-            }
-            mean /= vertical_histogram_rm_bkg.len() as f32;
-
-            let mut std = 0.0;
-            for it in vertical_histogram_rm_bkg.iter(){ 
-                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
-             }
-            std /= vertical_histogram_rm_bkg.len() as f32;
 
 
-            let mut dbscan_vec = Vec::new();
+        //TODO
+        //+ add verbose
+        //+ return each dimensions mean and median locations (this should be relative to the bounding box)
+        fn bound_character(bias: [i32; 4], vert_hist: &Vec<usize>, horz_hist: &Vec<Vec<usize>>, width: i32, height: i32)->[i32;4]{
+            let mut rt = [0; 4];
 
-            for (i, it) in vertical_histogram_rm_bkg.iter().enumerate(){
-                let _y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
-                let y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) as i32;
-                if _y_offset >  mean {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_GREEN, true);
-                    dbscan_vec.push(DbscanPt{index: i, class: -1});
+            {//Determine the x position and width
+                let mut mean = 0.0;
+                for it in vert_hist.iter(){
+                    mean += *it as f32 / height as f32;
                 }
-                else if _y_offset >  mean + std {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_RED, true);
+                mean /= vert_hist.len() as f32;
+
+
+                let mut dbscan_vec = Vec::new();
+                for (i, it) in vert_hist.iter().enumerate(){
+                    let _y_offset = *it as f32 / height as f32;
+                    if _y_offset >  mean {
+                        dbscan_vec.push(DbscanPt{index: i, class: -1});
+                    }
                 }
-                else {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_WHITE, true);
+
+
+                let number_of_classes = dbscan(&mut dbscan_vec, 8, 7);
+                
+                let mut good_class = -1  ;
+                let mut min_score = std::f32::MAX;
+                let mut good_coor = [0, 0i32];
+
+                for i in 1..number_of_classes{
+                    let _max = get_max_index(&dbscan_vec, i) as i32;
+                    let _min = get_min_index(&dbscan_vec, i) as i32;
+
+                    let coor_and_width  = [_min, _max - _min]; 
+                    let score = (((bias[0]-coor_and_width[0]) as f32).powf(2.0) + ((bias[2]-coor_and_width[1]) as f32).powf(2.0)).sqrt();
+
+                    if score < min_score{ 
+                        min_score = score; 
+                        good_class = i;
+                        good_coor = coor_and_width;
+                    } 
                 }
-            }
+                //TODO
+                if good_class == -1 { panic!("\nWe could not find the character! \nHandle Later \n Number of classes {}.", number_of_classes); } 
 
-            let c = dbscan(&mut dbscan_vec, 8, 7);
-
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_YELLOW, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_YELLOW, true);
-
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_YELLOW, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_YELLOW, true);
-        } 
-        {//Vertical his draw
-            let mut mean = 0.0;
-            for it in vertical_histogram_rm_bkg_ch2.iter(){ 
-                mean += (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
-            }
-            mean /= vertical_histogram_rm_bkg_ch1.len() as f32;
-
-            let mut std = 0.0;
-            for it in vertical_histogram_rm_bkg_ch2.iter(){ 
-                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
-             }
-            std /= vertical_histogram_rm_bkg_ch2.len() as f32;
-
-
-            let mut dbscan_vec = Vec::new();
-
-            for (i, it) in vertical_histogram_rm_bkg_ch2.iter().enumerate(){
-                let _y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0);
-                let y_offset = (*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) as i32;
-                if _y_offset >  mean {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], [0.8, 0.1, 0.8, 0.5], true);
-                    dbscan_vec.push(DbscanPt{index: i, class: -1});
-                }
-                else if _y_offset >  mean + std {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_RED, true);
-                }
-                else {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [500 + i as i32, 140+y_offset, 2, 2], C4_GREY, true);
-                }
+                rt[0] = good_coor[0];
+                rt[2] = good_coor[1];
             }
 
-            let c = dbscan(&mut dbscan_vec, 8, 7);
+            {//Determine the y position and height
+                let mut means = [0.0; 4];
+                let mut stds  = [0.0f32; 4]; //TODO think about this
+                let mut min_mean = std::f32::MAX;
 
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_GREEN, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 3) as i32, 140, 2, 50], C4_GREEN, true);
+                for (i, it) in horz_hist.iter().enumerate(){ 
+                    for (j, jt) in it.iter().enumerate(){ 
+                        means[i] +=  *jt as f32 / width as f32;
+                        stds[i]  += j as f32 / horz_hist[0].len() as f32 * ( *jt as f32 / width as f32  - means[i]/horz_hist[0].len() as f32).powf(2.0);
+                    }
+                    means[i] /= horz_hist[0].len() as f32;
+                    stds[i] = stds[i].sqrt() / horz_hist[0].len() as f32;
 
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_min_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_GREEN, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [500 + get_max_index(&dbscan_vec, 2) as i32, 140, 2, 50], C4_GREEN, true);
-        } 
-        drawRect(&mut GLOBAL_BACKBUFFER, [440, 200, 50, colorvec_data.small_bmp.height], C4_BLACK, true);
-        {//Horizontal his draw
-            let mut mean = 0.0;
-            for it in horizontal_histogram_rm_bkg.iter(){ 
-                mean += (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
+                    if means[i] < min_mean {
+                        min_mean = means[i]; 
+                    }
+                }
+
+
+                
+                //NOTE 2/2/2020 Thoth Gunter
+                //We sub divide the horizontal histograms into smaller slices.
+                //We do this to be sure our signal does not be buried by noise.
+                //However this process causes a problem. For very wide characters
+                //We must look across multiple windows. The algorithm as it is 
+                //Only looks at 2 windows.  If the character spans more than two windows
+                //we are not smart enough to pick the most interesting window. 
+                //This should be a rare problem but a problem non the less. 
+                //I'd imagine this is more of a problem for characters facing toward the left; 
+                //we should track if possible.
+                let window_width = width as usize / horz_hist.len();
+                let mut index1 = std::usize::MAX;
+                let mut index2 = std::usize::MAX;
+                for i in 0..horz_hist.len(){
+                    if (rt[0] as usize) < (i+1)*window_width && rt[0] as usize >= i*window_width{
+                        index1 = i; 
+                    }
+                    let p2 = (rt[0] + rt[2]) as usize; 
+                    if p2 < (i+1)*window_width &&  p2 >= i*window_width{
+                        index2 = i; 
+                    }
+                }
+                if index1 == std::usize::MAX { panic!("No good window found 1. {:?}", rt); } 
+                if index2 == std::usize::MAX { panic!("No good window found 2. {:?}", rt); } 
+
+
+
+                let mut dbscan_vec_index1 = Vec::new();
+                let mut dbscan_vec_index2 = Vec::new();
+                for (i, it) in horz_hist[index1].iter().enumerate(){
+                    let _x_offset = (*it as f32 / width as f32 );
+
+                    if _x_offset >  min_mean  {
+                        dbscan_vec_index1.push(DbscanPt{index: i, class: -1});
+                    }
+                }
+                if index1 != index2 && index2 != std::usize::MAX {
+                    for (i, it) in horz_hist[index2].iter().enumerate(){
+                        let _x_offset = (*it as f32 / width as f32 );
+
+                        if _x_offset >  min_mean  {
+                            dbscan_vec_index2.push(DbscanPt{index: i, class: -1});
+                        }
+                    }
+                }
+                let number_of_classes1 = dbscan(&mut dbscan_vec_index1, 8, 7);
+                let number_of_classes2 = dbscan(&mut dbscan_vec_index2, 8, 7);
+
+
+                let mut good_class1 = -1  ;
+                let mut min_score1 = std::f32::MAX;
+                let mut good_coor1 = [0, 0i32];
+
+                for i in 1..number_of_classes1{
+                    let _max = get_max_index(&dbscan_vec_index1, i) as i32;
+                    let _min = get_min_index(&dbscan_vec_index1, i) as i32;
+
+                    let coor_and_height  = [_min, _max - _min]; 
+                    let score = (((bias[1]-coor_and_height[0]) as f32).powf(2.0) + ((bias[3]-coor_and_height[1]) as f32).powf(2.0)).sqrt();
+
+                    if min_score1 > score{ 
+                        min_score1 = score; 
+                        good_class1 = i;
+                        good_coor1 = [_min, _max];
+                    } 
+                }
+                if good_class1 == -1 { panic!("\nWe could not find the character part1! \nHandle Later \n Number of classes {} {}.", number_of_classes1, dbscan_vec_index1.len()); } 
+
+
+
+                let mut good_class2 = -1  ;
+                let mut min_score2 = std::f32::MAX;
+                let mut good_coor2 = [0, 0i32];
+                for i in 1..number_of_classes2{
+                    let _max = get_max_index(&dbscan_vec_index2, i) as i32;
+                    let _min = get_min_index(&dbscan_vec_index2, i) as i32;
+
+                    let coor_and_height  = [_min, _max - _min]; 
+                    let score = (((bias[1]-coor_and_height[0]) as f32).powf(2.0) + ((bias[3]-coor_and_height[1]) as f32).powf(2.0)).sqrt();
+
+                    if min_score2 > score{ 
+                        min_score2 = score; 
+                        good_class2 = i;
+                        good_coor2 = [_min, _max];
+                    } 
+                }
+
+                //NOTE
+                //We pick the largest bounding region by combining our two windows
+                if good_class2 != -1 {
+                    if good_coor1[0] <= good_coor2[0]{ rt[1] = good_coor1[0]; }
+                    else { rt[1] = good_coor2[0]; }
+
+                    if good_coor1[1] >= good_coor2[1]{ rt[3] = good_coor1[1] - rt[1]; }
+                    else { rt[3] = good_coor2[1] - rt[1]; }
+
+                } else {
+                    rt[1] = good_coor1[0]; 
+                    rt[3] = good_coor1[1] - rt[1];
+                }
             }
-            mean /= horizontal_histogram_rm_bkg.len() as f32;
 
-            let mut std = 0.0;
-            for it in horizontal_histogram_rm_bkg.iter(){ 
-                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
-             }
-            std /= horizontal_histogram_rm_bkg.len() as f32;
 
-            let mut dbscan_vec = Vec::new();
-            for (i, it) in horizontal_histogram_rm_bkg.iter().enumerate(){
-                let _x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
-                let x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0) as i32;
-
-                if _x_offset >  mean {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_GREEN, true);
-                    dbscan_vec.push(DbscanPt{index: i, class: -1});
-                }
-                else if _x_offset >  mean + std {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_RED, true);
-                }
-                else {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_WHITE, true);
-                }
-            }
-
-            let c = dbscan(&mut dbscan_vec, 8, 7);
-
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 1) as i32, 50, 2], C4_YELLOW, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 1) as i32, 50, 2], C4_YELLOW, true);
-                                                                                             
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 2) as i32, 50, 2], C4_YELLOW, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 2) as i32, 50, 2], C4_YELLOW, true);
-        } 
-        {//Horizontal hist draw remove char 2?
-            let mut mean = 0.0;
-            for it in horizontal_histogram_rm_bkg_ch2.iter(){ 
-                mean += (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
-            }
-            mean /= horizontal_histogram_rm_bkg_ch2.len() as f32;
-
-            let mut std = 0.0;
-            for it in horizontal_histogram_rm_bkg_ch2.iter(){ 
-                std += ((*it as f32 / colorvec_data.small_bmp.height as f32 * 50.0) - mean).powf(2.0);
-             }
-            std /= horizontal_histogram_rm_bkg_ch2.len() as f32;
-
-            let mut dbscan_vec = Vec::new();
-            for (i, it) in horizontal_histogram_rm_bkg_ch2.iter().enumerate(){
-                let _x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0);
-                let x_offset = (*it as f32 / colorvec_data.small_bmp.width as f32 * 50.0) as i32;
-
-                if _x_offset >  mean {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], [0.8, 0.0, 0.8, 0.5], true);
-                    dbscan_vec.push(DbscanPt{index: i, class: -1});
-                }
-                else if _x_offset >  mean + std {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_RED, true);
-                }
-                else {
-                    drawRect(&mut GLOBAL_BACKBUFFER, [440 + x_offset as i32, 200+i as i32, 2, 2], C4_GREY, true);
-                }
-            }
-
-            let c = dbscan(&mut dbscan_vec, 8, 7);
-
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 1) as i32, 50, 2], C4_GREEN, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 1) as i32, 50, 2], C4_GREEN, true);
-                                                                                             
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_min_index(&dbscan_vec, 2) as i32, 50, 2], C4_GREEN, true);
-            drawRect(&mut GLOBAL_BACKBUFFER, [440, 200 + get_max_index(&dbscan_vec, 2) as i32, 50, 2], C4_GREEN, true);
+            assert!(rt[2] > 0, "\ncharacter rect width was negative or zero {}\n", rt[2]);
+            assert!(rt[3] > 0, "\ncharacter rect height was negative or zero {}\n", rt[3]);
+            return rt;
         }
+
+        //TODO
+        //supply some good bias rects
+        let mut rect_char1 = bound_character([10; 4], &vertical_histogram_rm_bkg_ch1, &arr_horizontal_histogram_rm_bkg_ch1, colorvec_data.small_bmp.width, colorvec_data.small_bmp.height);
+        rect_char1[0] += 500;
+        rect_char1[1] += 200;
+
+        let mut rect_char2 = bound_character([300, 10, 10, 10], &vertical_histogram_rm_bkg_ch2, &arr_horizontal_histogram_rm_bkg_ch2, colorvec_data.small_bmp.width, colorvec_data.small_bmp.height);
+        rect_char2[0] += 500;
+        rect_char2[1] += 200;
+        
+        drawBMP( &mut GLOBAL_BACKBUFFER, &mut colorvec_data.small_bmp, 500, 200, 1.0, None, None);
+
+        drawRect(&mut GLOBAL_BACKBUFFER, rect_char1, C4_WHITE, false);
+        drawRect(&mut GLOBAL_BACKBUFFER, rect_char2, C4_WHITE, false);
+
+
+        //Bias boxs
+        drawRect(&mut GLOBAL_BACKBUFFER, [510, 210, 10, 10], C4_YELLOW, false);
+        drawRect(&mut GLOBAL_BACKBUFFER, [800, 210, 10, 10], C4_YELLOW, false);
+
     }
 
 
@@ -2447,7 +2968,6 @@ fn app_colorvec(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinf
 
 
 
-    drawBMP( &mut GLOBAL_BACKBUFFER, &mut colorvec_data.small_bmp, 500, 200, 1.0, None, None);
     return 0;
 }}
 
@@ -2872,7 +3392,7 @@ fn app_rectangle(app_data: &mut AppData, keyboardinfo: &KeyboardInfo,
         rectapp_data.folder_path_textbox.max_char = 80;
         rectapp_data.folder_path_textbox.max_render_length = 600;
         rectapp_data.folder_path_textbox.text_color = [ 0.8, 0.8, 0.8, 0.7];
-        rectapp_data.folder_path_textbox.text_buffer = "temp".to_string();
+        rectapp_data.folder_path_textbox.text_buffer = "training_testing_data/background_subtraction_set".to_string();
     }
     {//Iterate to a new BMP
         //TODO

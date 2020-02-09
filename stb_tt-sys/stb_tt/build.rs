@@ -13,5 +13,6 @@ fn main() {
         //.define("_USRDLL", None)
         //.define("STB_TT_EXPORTS", None)
         //.include(&root.join("lib"))
+        .opt_level(2)
         .compile("stb_tt");
 }
