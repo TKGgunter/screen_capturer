@@ -1799,7 +1799,8 @@ struct JoystickHistory{
 }
 
 struct GamepadHistory{
-    gamepad: xinput::XINPUT_STATE,
+    //gamepad: xinput::XINPUT_STATE,
+    gamepad: JoystickInfo,
     timestamp: u128
 }
 struct KeystrokeAppData{
@@ -2068,6 +2069,8 @@ fn convert_to_joystick(gamepad : &xinput::XINPUT_STATE)->JoystickInfo{
     let b = (gamepad.Gamepad.wButtons & 0x2000) == 0x2000;
     let rb = (gamepad.Gamepad.wButtons & 0x200) == 0x200;
     let lb = (gamepad.Gamepad.wButtons & 0x100) == 0x100;
+    let axis_x = if (gamepad.Gamepad.sThumbLX as i32).abs()  < 500 { 0.0 } else { gamepad.Gamepad.sThumbLX as f32 / std::i16::MAX as f32 };
+    let axis_y = if (gamepad.Gamepad.sThumbLY as i32).abs()  < 500 { 0.0 } else { gamepad.Gamepad.sThumbLY as f32 / std::i16::MAX as f32 };
 
     JoystickInfo{
         x : if x { ButtonStatus::Down } else {ButtonStatus::Up},
@@ -2079,10 +2082,28 @@ fn convert_to_joystick(gamepad : &xinput::XINPUT_STATE)->JoystickInfo{
         lt : ButtonStatus::Up, //TODO
         rt : ButtonStatus::Up, //TODO
 
-        axis_x: gamepad.Gamepad.sThumbLX as f32 / std::i16::MAX as f32, 
-        axis_y: gamepad.Gamepad.sThumbLY as f32 / std::i16::MAX as f32,
+        axis_x: axis_x,
+        axis_y: axis_y,
     }
 }
+
+/*NOTE this is for reference
+fn same_gamepad_state(gp1: &xinput::XINPUT_STATE, gp2: &xinput::XINPUT_STATE)->bool{
+    //if gp1.dwPacketNumber == gp2.dwPacketNumber &&
+    if     gp1.Gamepad.wButtons == gp2.Gamepad.wButtons 
+       && ((gp1.Gamepad.bRightTrigger ==  gp2.Gamepad.bRightTrigger) || (gp1.Gamepad.bRightTrigger < 40 && gp2.Gamepad.bRightTrigger < 40))
+       && ((gp1.Gamepad.bLeftTrigger ==  gp2.Gamepad.bLeftTrigger) || (gp1.Gamepad.bLeftTrigger < 40 && gp2.Gamepad.bLeftTrigger < 40))
+       && ((gp1.Gamepad.sThumbLX - gp2.Gamepad.sThumbLX).abs() < 500 || (gp1.Gamepad.sThumbLX.abs() < 7000 && gp2.Gamepad.sThumbLX.abs() < 7000))
+       && ((gp1.Gamepad.sThumbRX - gp2.Gamepad.sThumbRX).abs() < 500 || (gp1.Gamepad.sThumbRX.abs() < 7000 && gp2.Gamepad.sThumbRX.abs() < 7000))
+       && ((gp1.Gamepad.sThumbLY - gp2.Gamepad.sThumbLY).abs() < 500 || (gp1.Gamepad.sThumbLY.abs() < 7000 && gp2.Gamepad.sThumbLY.abs() < 7000))
+       && ((gp1.Gamepad.sThumbRY - gp2.Gamepad.sThumbRY).abs() < 500 || (gp1.Gamepad.sThumbRY.abs() < 7000 && gp2.Gamepad.sThumbRY.abs() < 7000))
+       {
+            return true;
+       } else {
+            return false;
+       }
+} 
+*/
 
 
 fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, joystickinfo: &JoystickInfo, 
@@ -2113,11 +2134,18 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
         //TODO
         //check this error state
         let _temp = xinput::XInputGetState(0, &mut xgamepad as *mut xinput::XINPUT_STATE);
-        keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: xgamepad.clone(), timestamp: time_instance.as_millis() });
+        keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: convert_to_joystick(&xgamepad), timestamp: time_instance.as_millis() });
 
         keystroke_data.play_back_joystick = false;
         keystroke_data.play_back_gamepad = false;
     }
+
+    drawString(&mut GLOBAL_BACKBUFFER, "Instructions: ", 600, 400, C4_WHITE, 24.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Press ' ' to playback from arcade stick. ", 600, 370, C4_WHITE, 24.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Press 'b' to playback from gamepad. ", 600, 335, C4_WHITE, 24.0);
+    drawString(&mut GLOBAL_BACKBUFFER, "Press these buttons when on this screen. ", 600, 310, C4_WHITE, 24.0);
+
+
 
 
     if textinfo.character == ' '{
@@ -2144,8 +2172,21 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
         }
     }
     { // Get multiinput controller things 
-        drawString(&mut GLOBAL_BACKBUFFER, "Joystick", 70, 445, C4_WHITE, 26.0);
-   
+        let offset = drawString(&mut GLOBAL_BACKBUFFER, "Joystick", 70, 435, C4_WHITE, 26.0);
+        if in_rect(mouseinfo.x, mouseinfo.y, [70+offset, 445, offset, 26]){
+            drawString(&mut GLOBAL_BACKBUFFER, "CLEAR", 70+offset, 445, C4_WHITE, 26.0);
+
+            if mouseinfo.lbutton == ButtonStatus::Up && mouseinfo.old_lbutton == ButtonStatus::Down{
+                keystroke_data.joystick_history.clear();
+                keystroke_data.joystick_history.push( JoystickHistory{ joystick: joystickinfo.clone(), timestamp: time_instance.as_millis() });
+            }
+
+        } else{
+            drawString(&mut GLOBAL_BACKBUFFER, "CLEAR", 70+offset, 445, C4_GREY, 26.0);
+        } 
+
+
+ 
         let index = keystroke_data.joystick_history.len() - 1;
         if keystroke_data.joystick_history[index].joystick != *joystickinfo{
             keystroke_data.joystick_history.push( JoystickHistory{ joystick: joystickinfo.clone(), timestamp: time_instance.as_millis() });
@@ -2175,7 +2216,9 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
 
 
     {//xinput
-        drawString(&mut GLOBAL_BACKBUFFER, "Gamepad", 300, 435, C4_WHITE, 26.0);
+        let offset = drawString(&mut GLOBAL_BACKBUFFER, "Gamepad", 300, 435, C4_WHITE, 26.0);
+
+ 
         let mut xgamepad = xinput::XINPUT_STATE{
                                     dwPacketNumber: 0,
                                     Gamepad: xinput::XINPUT_GAMEPAD{
@@ -2188,26 +2231,22 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
                                         sThumbRY: 0,
                                   }};
         let _temp = xinput::XInputGetState(0, &mut xgamepad as *mut xinput::XINPUT_STATE);
+
+        if in_rect(mouseinfo.x, mouseinfo.y, [300+offset, 435, offset, 26]){
+            drawString(&mut GLOBAL_BACKBUFFER, "CLEAR", 300+offset, 435, C4_WHITE, 26.0);
+
+            if mouseinfo.lbutton == ButtonStatus::Up && mouseinfo.old_lbutton == ButtonStatus::Down{
+                keystroke_data.gamepad_history.clear();
+                keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: convert_to_joystick(&xgamepad), timestamp: time_instance.as_millis() });
+            }
+
+        } else{
+            drawString(&mut GLOBAL_BACKBUFFER, "CLEAR", 300+offset, 435, C4_GREY, 26.0);
+        }
         let index = keystroke_data.gamepad_history.len() - 1;
 
-        fn same_gamepad_state(gp1: &xinput::XINPUT_STATE, gp2: &xinput::XINPUT_STATE)->bool{
-            //if gp1.dwPacketNumber == gp2.dwPacketNumber &&
-            if     gp1.Gamepad.wButtons == gp2.Gamepad.wButtons 
-               && ((gp1.Gamepad.bRightTrigger ==  gp2.Gamepad.bRightTrigger) || (gp1.Gamepad.bRightTrigger < 40 && gp2.Gamepad.bRightTrigger < 40))
-               && ((gp1.Gamepad.bLeftTrigger ==  gp2.Gamepad.bLeftTrigger) || (gp1.Gamepad.bLeftTrigger < 40 && gp2.Gamepad.bLeftTrigger < 40))
-               && ((gp1.Gamepad.sThumbLX - gp2.Gamepad.sThumbLX).abs() < 500 || (gp1.Gamepad.sThumbLX.abs() < 7000 && gp2.Gamepad.sThumbLX.abs() < 7000))
-               && ((gp1.Gamepad.sThumbRX - gp2.Gamepad.sThumbRX).abs() < 500 || (gp1.Gamepad.sThumbRX.abs() < 7000 && gp2.Gamepad.sThumbRX.abs() < 7000))
-               && ((gp1.Gamepad.sThumbLY - gp2.Gamepad.sThumbLY).abs() < 500 || (gp1.Gamepad.sThumbLY.abs() < 7000 && gp2.Gamepad.sThumbLY.abs() < 7000))
-               && ((gp1.Gamepad.sThumbRY - gp2.Gamepad.sThumbRY).abs() < 500 || (gp1.Gamepad.sThumbRY.abs() < 7000 && gp2.Gamepad.sThumbRY.abs() < 7000))
-               {
-                    return true;
-               } else {
-                    return false;
-               }
-        } 
-
-        if !same_gamepad_state(& keystroke_data.gamepad_history[index].gamepad, &xgamepad){
-            keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: xgamepad.clone(), timestamp: time_instance.as_millis() });
+        if keystroke_data.gamepad_history[index].gamepad != convert_to_joystick(&xgamepad){
+            keystroke_data.gamepad_history.push( GamepadHistory{ gamepad: convert_to_joystick(&xgamepad), timestamp: time_instance.as_millis() });
         } 
 
         let recent_input_window = 30;
@@ -2218,7 +2257,7 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
             let y = 420 - _i as i32 *15;
             _i += 1;
 
-            let _joystickinfo = convert_to_joystick(&it.gamepad);
+            let _joystickinfo =  &it.gamepad;
             let button_x_down = get_downstatus!(_joystickinfo, x, 275,  y);
             let button_a_down = get_downstatus!(_joystickinfo, a, 295, y);
             let button_b_down = get_downstatus!(_joystickinfo, b, 325, y);
@@ -2227,6 +2266,7 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
             let button_lb_down = get_downstatus!(_joystickinfo, lb, 385, y);
             let button_rt_down = get_downstatus!(_joystickinfo, rt, 405, y);
             let button_lt_down = get_downstatus!(_joystickinfo, lt, 425, y);
+            drawString(&mut GLOBAL_BACKBUFFER, &format!("{:.2}   {:.2}", _joystickinfo.axis_x, _joystickinfo.axis_y), 280, y-8, C4_WHITE, 10.0);
 
             drawString(&mut GLOBAL_BACKBUFFER, &format!("millis {:?}", it.timestamp), 445, y, C4_WHITE, 12.0);
         }
@@ -2323,15 +2363,39 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
                     sleep(wait);
 
                 }
+
+                {//We must clear keyboard inputs
+                    let kb_inputs = joystick_to_keyboard( &JoystickInfo{x : ButtonStatus::Up,
+                                                                        y : ButtonStatus::Up,
+                                                                        a : ButtonStatus::Up,
+                                                                        b : ButtonStatus::Up,
+                                                                        lb : ButtonStatus::Up,
+                                                                        rb : ButtonStatus::Up,
+                                                                        lt : ButtonStatus::Up,
+                                                                        rt : ButtonStatus::Up,
+
+                                                                        axis_x : 0.0,
+                                                                        axis_y : 0.0,
+                                                                       });//->Vec<kb_input>
+                    let mut input_vec = Vec::new();
+                    for it in kb_inputs.iter(){
+                        let mut u = winapi::um::winuser::new_inputu();
+                        u.ki_mut().wVk = it.key as u16;
+                        u.ki_mut().dwFlags = it.down_up as u32;
+                        input_vec.push( INPUT{type_: 1, u: u }); 
+                    }
+                    winapi::um::winuser::SendInput(input_vec.len() as u32, input_vec.as_mut_ptr() , std::mem::size_of::<INPUT>() as i32);
+                }
+
                 keystroke_data.play_back_joystick = false;
-                println!("Playback");
+                println!("Play back finished.");
             }
             if keystroke_data.play_back_gamepad {
                 for j in 0..keystroke_data.gamepad_history.len()-1 {
                     let wait_duration =  keystroke_data.gamepad_history[j+1].timestamp - keystroke_data.gamepad_history[j].timestamp;
 
-                    let jt =  convert_to_joystick(&keystroke_data.gamepad_history[j].gamepad);
-                    let jt_next = convert_to_joystick(&keystroke_data.gamepad_history[j+1].gamepad);
+                    let jt      =  &keystroke_data.gamepad_history[j].gamepad;
+                    let jt_next = &keystroke_data.gamepad_history[j+1].gamepad;
 
                     let kb_inputs = joystick_to_keyboard( &jt );
                     let mut input_vec = Vec::new();
@@ -2350,6 +2414,28 @@ fn app_keystroke_rec_play(app_data: &mut AppData, keyboardinfo: &KeyboardInfo, j
                 }
                 keystroke_data.play_back_gamepad = false;
                 println!("Playback gamepad");
+                {//We must clear keyboard inputs
+                    let kb_inputs = joystick_to_keyboard( &JoystickInfo{x : ButtonStatus::Up,
+                                                                        y : ButtonStatus::Up,
+                                                                        a : ButtonStatus::Up,
+                                                                        b : ButtonStatus::Up,
+                                                                        lb : ButtonStatus::Up,
+                                                                        rb : ButtonStatus::Up,
+                                                                        lt : ButtonStatus::Up,
+                                                                        rt : ButtonStatus::Up,
+
+                                                                        axis_x : 0.0,
+                                                                        axis_y : 0.0,
+                                                                       });//->Vec<kb_input>
+                    let mut input_vec = Vec::new();
+                    for it in kb_inputs.iter(){
+                        let mut u = winapi::um::winuser::new_inputu();
+                        u.ki_mut().wVk = it.key as u16;
+                        u.ki_mut().dwFlags = it.down_up as u32;
+                        input_vec.push( INPUT{type_: 1, u: u }); 
+                    }
+                    winapi::um::winuser::SendInput(input_vec.len() as u32, input_vec.as_mut_ptr() , std::mem::size_of::<INPUT>() as i32);
+                }
             }
         }
 /*NOTE
